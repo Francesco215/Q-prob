@@ -1,121 +1,169 @@
-# Some background
+# Some Background
 
-Off policy reinforcment learning revolves around the bellman equation
+Off-policy reinforcement learning revolves around the **Bellman equation**:
 
 $$
-Q^*(s,a) = r(s,a) + \gamma\max_{a'}Q^*(s',a')
+Q^*(s,a) = r(s,a) + \gamma \max_{a'} Q^*(s',a')
 $$
+
 Where:
 
-- $Q^*(s,a)$ is the optimal $Q$-value for taking action $a$ in state $s$. It represents the maximum total discounted reward the agent can expect to get from this point forward.
-
-- $R(s,a)$ is the immediate reward received after taking action a from state $s$.
-
-- $\gamma\approx1$ is the discount factor.
-
-- $\max_{a'}Q^*(s',a')$ is the maximum $Q$-value for the next state, $s'$, across all possible actions, $a'$. This is the crucial part that links the current $Q$-value to the optimal $Q$-value of the next state, assuming the agent will choose the best possible action from that point on.
-
-## The loss function
-The training is usually bootstrapped 
-
-The way is done usually is by minimizing the $L_2$ loss
-
-$$\mathbb E_{\{s,a,r,s'\}\sim D}\left[Q_\theta(s,a) - \left(r + \gamma \max_{a'}Q_{\bar\theta}(s',a') \right) \right]^2$$
+- $Q^*(s,a)$ is the optimal $Q$-value for taking action $a$ in state $s$. It represents the maximum total discounted reward the agent can expect from this point forward.
+- $r(s,a)$ is the immediate reward received after taking action $a$ from state $s$.
+- $\gamma \in (0,1]$ is the discount factor.
+- $\max_{a'}Q^*(s',a')$ is the maximum $Q$-value for the next state $s'$ across all possible actions $a'$. This term links the current $Q$-value to the optimal future value, assuming the agent acts optimally.
 
 
+## The Loss Function
 
-## What's the problem here?
-
-The problem is that doesn't work. $Q$-learning, has a major scalability problem when applied to complex, long-horizon tasks. 
-
-There are multiple reasons, but the main one is that the model needs to have a way of estimating the confidence of his prediciton. The loss above assumes that $Q_\theta$ has a constant confidence interval.
-
-Intuitively this is impossible. Some game states can be way more hard to evaluate than others, so how can we fix this?
-
-# The proper way
-
-Lets assume that $Q$ comes from a probability distribuition $p=p(Q|s,a)$ and the target comes from the probability $q=q(Q|r,s')$ where the target is equal to
+Training is typically **bootstrapped**. A common approach is to minimize the $L_2$ loss:
 
 $$
-    q(Q|r,s') = r + \gamma \max_{a'}p(Q|s',a')
+\mathbb{E}_{\{s,a,r,s'\}\sim D}\left[ Q_\theta(s,a) - \left( r + \gamma \max_{a'} Q_{\bar\theta}(s',a') \right) \right]^2
 $$
 
-The loss is equal to the negative log-likelyhood
-$$
-L=-\mathbb E_{\{s,a,r,s'\}\sim D}\big[\mathbb E_{Q\sim q}\log p\big] = -\mathbb E_{\{s,a,r,s'\}\sim D}\Big[\textrm{KL}(p||q) + S(q)\Big]
-$$
-
-## What are $p$ and $q$?
-Since 
-$q(Q|r,s') = r + \gamma \max_{a'}p(Q|s',a')$
-the family of probability distribuition to wich $p$ and $q$ belong must be closed under maximization (for the $\max_{a'}$ over independent draws from $p$) as well as linear transformations (for the shift by $r$ and scaling by $\gamma$).
+where $D$ is the replay buffer, $\theta$ are the learnable parameters, and $\bar\theta$ is a delayed copy of the network used for stabilization.
 
 
-The functions are known and belong to [the Generalized extreme value (GEV) distribution family](https://en.wikipedia.org/wiki/Generalized_extreme_value_distribution). In this work we are going to use the [Gumbel Distribution](https://en.wikipedia.org/wiki/Gumbel_distribution)
+## The Problem
+
+This approach does not scale well to complex, long-horizon tasks.  
+
+The main issue is that the model lacks a notion of **confidence** in its predictions. The loss above implicitly assumes $Q_\theta$ has a constant confidence interval, which is unrealistic.  
+
+Intuitively, some game states are much harder to evaluate than others. We therefore need a formulation that accounts for uncertainty.
+
+
+# A Probabilistic Approach
+
+Let us assume:
+
+- $Q$ is drawn from a probability distribution $p = p(Q|s,a)$  
+- The target is drawn from $q = q(Q|r,s')$, where
 
 $$
-p(Q|s,a)=\textrm{Gumbel}(Q|\mu,\beta)= \frac 1\beta e^{-(z+e^{-z})}\quad\quad \textrm{with } z=\frac {Q-\mu}\beta
-$$
-Where $\mu$ depends form the state and the action, but $\beta$ just from the state. Both of them from learnable parameters $\theta$ and $\phi$ 
-$$\mu = \mu_\theta(s,a)\quad\textrm{and}\quad\beta = \beta_\phi(s)$$
-
-It is possible to show that given this definition of $p$ we have that $q$ is equal to
-$$
-    q(Q|r,s')=\textrm{Gumbel}(Q|\mu_q,\beta_q)
-$$
-Where
-$$\beta_q = \gamma \cdot \beta_{\phi}(s')$$
-$$
-\mu_q = r+\gamma\cdot\beta_\phi\log\left[
-    \sum_{a'}\exp\frac {\mu_\theta(s',a')}{\beta_\phi(s')}
-    \right]
+q(Q|r,s') = r + \gamma \max_{a'} p(Q|s',a').
 $$
 
-### Entropy of a Gumbel distribution
-
-For $X \sim \mathrm{Gumbel}(\mu,\beta)$, the entropy has a closed form:
+We can define the loss as the **negative log-likelihood**:
 
 $$
-H[X] = \ln \beta + \gamma_e + 1
+L = -\mathbb{E}_{\{s,a,r,s'\}\sim D} \Big[ \mathbb{E}_{Q\sim q}\,\log p \Big]
+   = -\mathbb{E}_{\{s,a,r,s'\}\sim D} \Big[ \mathrm{KL}(p\|q) + H[q] \Big],
+$$
+
+where $H[q]$ is the entropy of $q$.
+
+
+## Choosing $p$ and $q$
+
+Since
+
+$$
+q(Q|r,s') = r + \gamma \max_{a'} p(Q|s',a'),
+$$
+
+the family of distributions must be **closed under maximization** (for the $\max_{a'}$ term) and **closed under linear transformations** (for the shift by $r$ and scaling by $\gamma$).
+
+These properties hold for the [Generalized Extreme Value (GEV) distribution](https://en.wikipedia.org/wiki/Generalized_extreme_value_distribution).  
+In this work, we use the [**Gumbel distribution**](https://en.wikipedia.org/wiki/Gumbel_distribution):
+
+$$
+p(Q|s,a) = \mathrm{Gumbel}(Q|\mu,\beta) 
+= \frac{1}{\beta} e^{-(z+e^{-z})}, 
+\quad z = \frac{Q-\mu}{\beta}.
+$$
+
+Here:
+
+- $\mu = \mu_\theta(s,a)$ depends on both state and action,  
+- $\beta = \beta_\phi(s)$ depends only on the state.  
+
+Both are learnable functions parameterized by $\theta$ and $\phi$.
+
+
+## Target Distribution
+
+It can be shown that under this definition:
+
+$$
+q(Q|r,s') = \mathrm{Gumbel}(Q|\mu_q,\beta_q),
+$$
+
+with
+
+$$
+\beta_q = \gamma \cdot \beta_\phi(s'), \quad
+\mu_q = r + \gamma \cdot \beta_\phi(s') \cdot 
+\log\!\left[ \sum_{a'} \exp\frac{\mu_\theta(s',a')}{\beta_\phi(s')} \right].
+$$
+
+
+## Useful Properties
+
+### Entropy of a Gumbel
+
+For $X \sim \mathrm{Gumbel}(\mu,\beta)$:
+
+$$
+H[X] = \ln \beta + \gamma_e + 1,
 $$
 
 where $\gamma_e \approx 0.5772$ is the Euler–Mascheroni constant.
 
-### KL divergence between two Gumbels
 
-Let $p=\mathrm{Gumbel}(\mu_p,\beta_p)$ and $q=\mathrm{Gumbel}(\mu_q,\beta_q)$.
+### KL Divergence Between Two Gumbels
 
-
-Then the KL divergence has a closed form [[source](https://mast.queensu.ca/~communications/Papers/gil-msc11.pdf)]:
+Let $p = \mathrm{Gumbel}(\mu_p,\beta_p)$ and $q = \mathrm{Gumbel}(\mu_q,\beta_q)$.  
+The KL divergence has a closed form [[source](https://mast.queensu.ca/~communications/Papers/gil-msc11.pdf)]:
 
 $$
 \mathrm{KL}[p\|q] =
 \ln \frac{\beta_q}{\beta_p}
 + \frac{\mu_p - \mu_q}{\beta_q}
 + \gamma_e \left(\frac{\beta_p}{\beta_q} - 1\right)
-+ \exp\!\left(-\frac{\mu_p - \mu_q}{\beta_q}\right)\,\Gamma\left(1+\frac{\beta_p}{\beta_q}\right)
++ \exp\!\left(-\frac{\mu_p - \mu_q}{\beta_q}\right)\,
+\Gamma\!\left(1+\frac{\beta_p}{\beta_q}\right)
 - 1,
 $$
 
 where $\Gamma(\cdot)$ is the gamma function.
 
 
-## The loss function
+# The Final Loss
 
-To make the loss function stable we are going to calculate directly $\nu = \log \beta$ 
+To improve numerical stability, we reparameterize with $\nu = \log \beta$.  
 
-$$
-\textrm{KL}[p||q]=\nu_q-\nu_p + (\mu_p-\mu_q)e^{-\nu_q} + \gamma_e(e^{\nu_p-\nu_q}-1)+\exp\left[-(\mu_p-\mu_q)e^{-\nu_q}\right]\Gamma\left(e^{\nu_p-\nu_q}+1\right) - 1
-$$
+Then:
 
 $$
-S(p) = \nu_p + \gamma_e +1
+\mathrm{KL}[p\|q] =
+\nu_q - \nu_p 
++ (\mu_p-\mu_q)e^{-\nu_q} 
++ \gamma_e \big(e^{\nu_p-\nu_q}-1\big) 
++ \exp\!\big[-(\mu_p-\mu_q)e^{-\nu_q}\big] \Gamma\!\left(e^{\nu_p-\nu_q}+1\right) - 1,
 $$
 
-So the total loss is
+and
+
 $$
-L = \nu_q + (\mu_p-\mu_q)e^{-\nu_q} + \gamma_ee^{\nu_p-\nu_q}+\exp\left[-(\mu_p-\mu_q)e^{-\nu_q}\right]\Gamma\left(e^{\nu_p-\nu_q}+1\right)
+H[p] = \nu_p + \gamma_e + 1.
 $$
 
-It will be convenient to plot both. The KL divergence serves as a metric that shows us how much information the model can learn from the prediction of his future steps. The total loss is a measure on how uncertain and wrong the model is in general when it comes to choose a good move.
+So the total loss becomes:
+
+$$
+L = \nu_q 
+  + (\mu_p-\mu_q)e^{-\nu_q} 
+  + \gamma_e e^{\nu_p-\nu_q} 
+  + \exp\!\big[-(\mu_p-\mu_q)e^{-\nu_q}\big] \Gamma\!\left(e^{\nu_p-\nu_q}+1\right).
+$$
+
+
+## Interpretation
+
+- The **KL divergence** measures how much information the model gains when predicting future outcomes.  
+- The **Entropy** measures how much uncertain the model is when choosing the future move.  
+- The **total loss** reflects both the **uncertainty** and the **error** of the model when deciding on an action.  
+
 
