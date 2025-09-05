@@ -160,6 +160,11 @@ L = \mathrm{KL}[q\|p] + H[q] =
 \Gamma\!\big(1 + e^{\nu_q-\nu_p}\big)
 $$
 
+If you are at the last move the loss is just equal to 
+$$
+L = -\log p(r|\mu_p,\beta_p)=\nu_p -(\mu_p-r)e^{-\nu_p} + \exp\!\big[(\mu_p-r)e^{-\nu_p}\big]\,
+$$
+
 
 ## Interpretation
 
