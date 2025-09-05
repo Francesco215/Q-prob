@@ -49,7 +49,7 @@ We can define the loss as the **negative log-likelihood**:
 
 $$
 L = -\mathbb{E}_{\{s,a,r,s'\}\sim D} \Big[ \mathbb{E}_{Q\sim q}\,\log p \Big]
-   = -\mathbb{E}_{\{s,a,r,s'\}\sim D} \Big[ \mathrm{KL}(p\|q) + H[q] \Big],
+   = -\mathbb{E}_{\{s,a,r,s'\}\sim D} \Big[ \mathrm{KL}(q\|p) + H[q] \Big],
 $$
 
 where $H[q]$ is the entropy of $q$.
@@ -76,8 +76,8 @@ $$
 
 Here:
 
-- $\mu = \mu_\theta(s,a)$ depends on both state and action,  
-- $\beta = \beta_\phi(s)$ depends only on the state.  
+- $\mu_p = \mu_\theta(s,a)$ depends on both state and action,  
+- $\beta_p = \beta_\phi(s)$ depends only on the state.  
 
 Both are learnable functions parameterized by $\theta$ and $\phi$.
 
@@ -118,13 +118,12 @@ Let $p = \mathrm{Gumbel}(\mu_p,\beta_p)$ and $q = \mathrm{Gumbel}(\mu_q,\beta_q)
 The KL divergence has a closed form [[source](https://mast.queensu.ca/~communications/Papers/gil-msc11.pdf)]:
 
 $$
-\mathrm{KL}[p\|q] =
-\ln \frac{\beta_q}{\beta_p}
-+ \frac{\mu_p - \mu_q}{\beta_q}
-+ \gamma_e \left(\frac{\beta_p}{\beta_q} - 1\right)
-+ \exp\!\left(-\frac{\mu_p - \mu_q}{\beta_q}\right)\,
-\Gamma\!\left(1+\frac{\beta_p}{\beta_q}\right)
-- 1,
+\mathrm{KL}[q\|p] =
+\ln\frac{\beta_p}{\beta_q}
++ \frac{\mu_q - \mu_p}{\beta_p}
++ \gamma_e\left(\frac{\beta_q}{\beta_p} - 1\right)
++ \exp\left(-\frac{\mu_q-\mu_p}{\beta_p}\right)
+\Gamma\left(1 + \frac{\beta_q}{\beta_p}\right) - 1
 $$
 
 where $\Gamma(\cdot)$ is the gamma function.
@@ -137,26 +136,28 @@ To improve numerical stability, we reparameterize with $\nu = \log \beta$.
 Then:
 
 $$
-\mathrm{KL}[p\|q] =
-\nu_q - \nu_p 
-+ (\mu_p-\mu_q)e^{-\nu_q} 
-+ \gamma_e \big(e^{\nu_p-\nu_q}-1\big) 
-+ \exp\!\big[-(\mu_p-\mu_q)e^{-\nu_q}\big] \Gamma\!\left(e^{\nu_p-\nu_q}+1\right) - 1,
+\mathrm{KL}[q\|p] =
+\nu_p - \nu_q
+- (\mu_p-\mu_q)\,e^{-\nu_p} 
++ \gamma_e \big(e^{\nu_q-\nu_p}-1\big) 
++ \exp\!\big[(\mu_p-\mu_q)e^{-\nu_p}\big]\,
+\Gamma\!\left(e^{\nu_q-\nu_p}+1\right) - 1
 $$
 
 and
 
 $$
-H[p] = \nu_p + \gamma_e + 1.
+H[q] = \nu_q + \gamma_e + 1.
 $$
 
 So the total loss becomes:
 
 $$
-L = \nu_q 
-  + (\mu_p-\mu_q)e^{-\nu_q} 
-  + \gamma_e e^{\nu_p-\nu_q} 
-  + \exp\!\big[-(\mu_p-\mu_q)e^{-\nu_q}\big] \Gamma\!\left(e^{\nu_p-\nu_q}+1\right).
+L = \mathrm{KL}[q\|p] + H[q] =
+\nu_p \;-\; (\mu_p-\mu_q)\,e^{-\nu_p}
+\;+\;\gamma_e\,e^{\nu_q-\nu_p}
+\;+\;\exp\!\big[(\mu_p-\mu_q)e^{-\nu_p}\big]\,
+\Gamma\!\big(1 + e^{\nu_q-\nu_p}\big)
 $$
 
 
