@@ -83,43 +83,39 @@ where $\gamma_e \approx 0.5772$ is the Euler–Mascheroni constant.
 
 ### KL divergence between two Gumbels
 
-Let $p=\mathrm{Gumbel}(\mu_1,\beta_1)$ and $q=\mathrm{Gumbel}(\mu_2,\beta_2)$.
+Let $p=\mathrm{Gumbel}(\mu_p,\beta_p)$ and $q=\mathrm{Gumbel}(\mu_q,\beta_q)$.
 
 
 Then the KL divergence has a closed form [[source](https://mast.queensu.ca/~communications/Papers/gil-msc11.pdf)]:
 
 $$
 \mathrm{KL}[p\|q] =
-\ln \frac{\beta_2}{\beta_1}
-+ \frac{\mu_1 - \mu_2}{\beta_2}
-+ \gamma_e \left(\frac{\beta_1}{\beta_2} - 1\right)
-+ \exp\!\left(-\frac{\mu_1 - \mu_2}{\beta_2}\right)\,\Gamma\left(1+\frac{\beta_1}{\beta_2}\right)
+\ln \frac{\beta_q}{\beta_p}
++ \frac{\mu_p - \mu_q}{\beta_q}
++ \gamma_e \left(\frac{\beta_p}{\beta_q} - 1\right)
++ \exp\!\left(-\frac{\mu_p - \mu_q}{\beta_q}\right)\,\Gamma\left(1+\frac{\beta_p}{\beta_q}\right)
 - 1,
 $$
 
 where $\Gamma(\cdot)$ is the gamma function.
 
----
 
 ## The loss function
 
-The distributional $Q$-learning loss is now:
+To make the loss function stable we are going to calculate directly $\nu = \log \beta$ 
 
 $$
-L(\theta) = 
-- \mathbb E_{\{s,a,r,s'\}\sim D}\; \mathbb E_{Q \sim q(\cdot \mid r,s')}
-\; \log p_\theta(Q \mid s,a).
+\textrm{KL}[p||q]=\nu_q-\nu_p + (\mu_p-\mu_q)e^{-\nu_q} + \gamma_e(e^{\nu_p-\nu_q}-1)+\exp\left[-(\mu_p-\mu_q)e^{-\nu_q}\right]\Gamma\left(e^{\nu_p-\nu_q}+1\right) - 1
 $$
 
-In closed form (using the KL expression above):
-
 $$
-L(\theta) =
-\mathbb E_{\{s,a,r,s'\}\sim D}\;
-\mathrm{KL}\!\left(
-p_\theta(\cdot\mid s,a) \;\Big\|\;
-q(\cdot\mid r,s')
-\right).
+S(p) = \nu_p + \gamma_e +1
 $$
 
-This loss ensures that the predicted distribution $p_\theta$ matches the bootstrapped target distribution $q$, while naturally incorporating uncertainty through the entropy of the Gumbel family.
+So the total loss is
+$$
+L = \nu_q + (\mu_p-\mu_q)e^{-\nu_q} + \gamma_ee^{\nu_p-\nu_q}+\exp\left[-(\mu_p-\mu_q)e^{-\nu_q}\right]\Gamma\left(e^{\nu_p-\nu_q}+1\right)
+$$
+
+It will be convenient to plot both. The KL divergence serves as a metric that shows us how much information the model can learn from the prediction of his future steps. The total loss is a measure on how uncertain and wrong the model is in general when it comes to choose a good move.
+
