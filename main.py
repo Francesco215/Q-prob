@@ -14,9 +14,9 @@ import time
 import numpy as np
 import torch
 
-import env_preprocessing
-import MRQ
-import utils
+import MRQ.env_preprocessing
+import MRQ.MRQ
+import MRQ.utils
 
 
 @dataclasses.dataclass

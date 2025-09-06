@@ -3,7 +3,7 @@
 
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
-
+import numpy as np
 
 from collections.abc import Callable
 from functools import partial
@@ -109,23 +109,22 @@ class Policy(nn.Module):
         action, _ = self.forward(zs)
         return action
 
+class ValueNetwork(nn.Module):
+    def __init__(self, input_dim: int, output_dim: int, hdim: int=512, activ: str='elu'):
+        super().__init__()
+        self.q1 = BaseMLP(input_dim, hdim, hdim, activ)
+        self.q2 = nn.Linear(hdim, output_dim)
+
+        self.activ = getattr(F, activ)
+        self.apply(weight_init)
+
+    def forward(self, zsa: torch.Tensor):
+        zsa = ln_activ(self.q1(zsa), self.activ)
+        return self.q2(zsa)
 
 class Value(nn.Module):
     def __init__(self, zsa_dim: int=512, hdim: int=512, activ: str='elu'):
         super().__init__()
-
-        class ValueNetwork(nn.Module):
-            def __init__(self, input_dim: int, output_dim: int, hdim: int=512, activ: str='elu'):
-                super().__init__()
-                self.q1 = BaseMLP(input_dim, hdim, hdim, activ)
-                self.q2 = nn.Linear(hdim, output_dim)
-
-                self.activ = getattr(F, activ)
-                self.apply(weight_init)
-
-            def forward(self, zsa: torch.Tensor):
-                zsa = ln_activ(self.q1(zsa), self.activ)
-                return self.q2(zsa)
 
         self.q1 = ValueNetwork(zsa_dim, 1, hdim, activ)
         self.q2 = ValueNetwork(zsa_dim, 1, hdim, activ)
@@ -133,3 +132,43 @@ class Value(nn.Module):
 
     def forward(self, zsa: torch.Tensor):
         return torch.cat([self.q1(zsa), self.q2(zsa)], 1)
+
+class Q(nn.Module):
+    def __init__(self, zsa_dim: int=512, zs_dim: int=512, hdim: int=512, activ: str='elu'):
+        super().__init__()
+        self.mu = ValueNetwork(zsa_dim, 1, hdim, activ)
+        self.nu = ValueNetwork(zs_dim, 1, hdim, activ)
+
+        self.activ = getattr(F, activ)
+        self.apply(weight_init)
+
+    def distribuition(self, zsa, zs):
+        mu, nu = self.mu(zsa), self.nu(zs)
+
+        return torch.distributions.gumbel.Gumbel(mu, nu.exp())
+    
+    def loss(self, zsa, zs, zsa_n, zs_n, r, gamma=1):
+        # TODO: add clipping maybe to nu
+        b, c = zsa.shape
+        b, c = zs.shape
+        mu_p, nu_p = self.mu(zsa), self.nu(zs)
+
+        if zsa_n is None:
+            z = (mu_p - r)*torch.exp(-nu_p)
+            return nu_p - z + z.exp()
+
+        b, c = zs_n.shape
+        b, a, c = zsa_n.shape
+
+        with torch.no_grad():
+            mu_q = self.mu(zsa_n)
+            nu_q = self.nu(zs_n)
+
+            logsumexp = torch.logsumexp(mu_q*(-nu_q).exp().unqueeze(1), dim=1)
+            mu_q = r + gamma*nu_q.exp()*logsumexp
+            nu_q = nu_q+np.log(gamma)
+
+        z = (mu_p-mu_q)*torch.exp(-nu_p)        
+        b = torch.exp(nu_q-nu_p)
+
+        nu_p - z + np.euler_gamma*b + z.exp() + torch.lgamma(1+b).exp()
