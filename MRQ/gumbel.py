@@ -98,7 +98,7 @@ class Agent:
 
         self.replay_buffer = buffer.ReplayBuffer(
             obs_shape, action_dim, max_action, pixel_obs, self.device,
-            history, max(self.enc_horizon, self.Q_horizon), self.buffer_size, self.batch_size,
+            history, self.buffer_size, self.batch_size,
             self.prioritized, initial_priority=self.min_priority)
 
         self.encoder = models.Encoder(obs_shape[0] * history, action_dim, pixel_obs,
@@ -204,8 +204,8 @@ class Agent:
     def train_rl(self, state: torch.Tensor, action: torch.Tensor, next_state: torch.Tensor,
         reward: torch.Tensor, term_discount: torch.Tensor, reward_scale: float, target_reward_scale: float):
         with torch.no_grad():
-            zs = self.encoder.zs(state).view(self.batch_size)
-            zsa = self.encoder(zs, action).view(self.batch_size)
+            zs = self.encoder.zs(state)
+            zsa = self.encoder(zs, action)
             next_zs = self.encoder_target.zs(next_state)
 
             # Pseudocode for discrete actions
@@ -213,11 +213,11 @@ class Agent:
             repeated_next_zs = next_zs.repeat_interleave(self.action_dim, dim=0)
             next_zsa = self.encoder_target(repeated_next_zs, all_next_actions_one_hot.repeat(self.batch_size, 1))
 
-            mu_q = self.value_target.mu(next_zsa).view(self.batch_size, self.action_dim)
-            nu_q = self.value_target.nu(next_zs).view(self.batch_size)
+            mu_q = self.value_target.mu(next_zsa)
+            nu_q = self.value_target.nu(next_zs)
 
         mu_p = self.value.mu(zsa)
-        nu_p = self.value.su(zs)
+        nu_p = self.value.nu(zs)
 
         loss, KL = self.value.loss(reward, mu_p, nu_p, mu_q, nu_q)
 
@@ -230,11 +230,13 @@ class Agent:
         for p in self.encoder.parameters(): p.requires_grad = False
         for p in self.value.parameters(): p.requires_grad = False
 
-        policy_action, _ = self.policy(zs) # Get action from current policy
-        zsa_policy = self.encoder(zs, policy_action)
-        mu_policy, _ = self.value.mu(zsa_policy), self.value.nu(zs)
 
-        policy_loss = -mu_policy.mean() # Maximize mu
+        zs_policy = self.encoder.zs(state) 
+        policy_action, _ = self.policy(zs) 
+        zsa_policy = self.encoder(zs, policy_action)
+        mu_policy, nu_policy = self.value.mu(zsa_policy), self.value.nu(zs)
+
+        policy_loss = -(mu_policy + np.euler_gamma * nu_policy.exp()).mean() 
 
         self.policy_optimizer.zero_grad()
         policy_loss.backward()
