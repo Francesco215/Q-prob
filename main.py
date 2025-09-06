@@ -14,9 +14,7 @@ import time
 import numpy as np
 import torch
 
-import MRQ.env_preprocessing
-import MRQ.MRQ
-import MRQ.utils
+from src import env_preprocessing, gumbel, utils
 
 
 @dataclasses.dataclass
@@ -77,7 +75,7 @@ def main():
         env = env_preprocessing.Env(args.env, args.seed, eval_env=False)
         eval_env = env_preprocessing.Env(args.env, args.seed+100, eval_env=True) # +100 to make sure the seed is different.
 
-        agent = MRQ.Agent(env.obs_shape, env.action_dim, env.max_action,
+        agent = gumbel.Agent(env.obs_shape, env.action_dim, env.max_action,
             env.pixel_obs, env.discrete, device, env.history)
 
         logger = utils.Logger(f'{args.log_folder}/{args.project_name}.txt')
@@ -222,7 +220,7 @@ def load_experiment(save_folder: str, project_name: str, device: torch.device, a
     eval_env = pickle.load(open(f'{save_folder}/{project_name}/eval_env.pickle', 'rb'))
     # Load agent
     agent_dict = np.load(f'{save_folder}/{project_name}/agent_var.npy', allow_pickle=True).item()
-    agent = MRQ.Agent(env.obs_shape, env.action_dim, env.max_action,
+    agent = gumbel.Agent(env.obs_shape, env.action_dim, env.max_action,
         env.pixel_obs, env.discrete, device, env.history, dataclasses.asdict(agent_dict['hp']))
     agent.load(f'{save_folder}/{project_name}')
 

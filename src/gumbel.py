@@ -127,7 +127,6 @@ class Agent:
         self.max_action = max_action
 
         # Tracked values
-        self.reward_scale, self.target_reward_scale = 1, 0
         self.training_steps = 0
 
 
@@ -152,11 +151,9 @@ class Agent:
             self.policy_target.load_state_dict(self.policy.state_dict())
             self.value_target.load_state_dict(self.value.state_dict())
             self.encoder_target.load_state_dict(self.encoder.state_dict())
-            self.target_reward_scale = self.reward_scale
-            self.reward_scale = self.replay_buffer.reward_scale()
 
             for _ in range(self.target_update_freq):
-                state, action, next_state, reward, not_done = self.replay_buffer.sample(self.enc_horizon, include_intermediate=True)
+                state, action, next_state, reward, not_done = self.replay_buffer.sample()
                 state, next_state = maybe_augment_state(state, next_state, self.pixel_obs, self.pixel_augs)
                 self.train_encoder(state, action, next_state, reward, not_done, self.replay_buffer.env_terminates)
 
@@ -164,11 +161,9 @@ class Agent:
         state, next_state = maybe_augment_state(state, next_state, self.pixel_obs, self.pixel_augs) #TODO: check this
 
         
-        KL = self.train_rl(state, action, next_state, reward, self.term_discount,
-            self.reward_scale, self.target_reward_scale)
+        KL = self.train_rl(state, action, next_state, reward, self.term_discount)
 
         if self.prioritized:
-            # TODO: fix this!
             priority = KL
             priority = priority.clamp(min=self.min_priority).pow(self.alpha)
             self.replay_buffer.update_priority(priority)

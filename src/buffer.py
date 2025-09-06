@@ -136,7 +136,7 @@ class ReplayBuffer:
             # Uniform sampling
             sampled_relative_indices = torch.randint(0, len(valid_indices), size=(self.batch_size,), device=self.device)
 
-        self.sampled_indices = valid_indices[sampled_relative_indices].cpu().numpy()
+        self.sampled_indices = valid_indices[sampled_relative_indices.cpu()].numpy()
         
         # Retrieve batch data
         state = self._get_states(self.sampled_indices)
