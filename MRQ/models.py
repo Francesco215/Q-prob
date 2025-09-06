@@ -155,11 +155,14 @@ class Gumbel(nn.Module):
             return nu_p - z + z.exp()
 
         with torch.no_grad():
-            logsumexp = torch.logsumexp(mu_q*(-nu_q).exp(), dim=1)
+            logsumexp = torch.logsumexp(mu_q*(-nu_q).exp().unsqueeze(1), dim=1)
             mu_q = r + gamma*nu_q.exp()*logsumexp
             nu_q = nu_q+np.log(gamma)
 
         z = (mu_p-mu_q)*torch.exp(-nu_p)        
         d = torch.exp(nu_q-nu_p)
 
-        nu_p - z + np.euler_gamma*d + z.exp() + torch.lgamma(1+d).exp()
+        loss = nu_p - z + np.euler_gamma*d + z.exp() + torch.lgamma(1+d).exp()
+        KL = loss + nu_q + np.euler_gamma + 1
+
+        return loss.mean(), KL
