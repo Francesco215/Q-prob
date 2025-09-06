@@ -133,7 +133,7 @@ class Value(nn.Module):
     def forward(self, zsa: torch.Tensor):
         return torch.cat([self.q1(zsa), self.q2(zsa)], 1)
 
-class Q(nn.Module):
+class Gumbel(nn.Module):
     def __init__(self, zsa_dim: int=512, zs_dim: int=512, hdim: int=512, activ: str='elu'):
         super().__init__()
         self.mu = ValueNetwork(zsa_dim, 1, hdim, activ)
@@ -147,28 +147,19 @@ class Q(nn.Module):
 
         return torch.distributions.gumbel.Gumbel(mu, nu.exp())
     
-    def loss(self, zsa, zs, zsa_n, zs_n, r, gamma=1):
-        # TODO: add clipping maybe to nu
-        b, c = zsa.shape
-        b, c = zs.shape
-        mu_p, nu_p = self.mu(zsa), self.nu(zs)
 
-        if zsa_n is None:
+    def loss(self, r, mu_p, nu_p, mu_q, nu_q, gamma=1):
+
+        if mu_q is None:
             z = (mu_p - r)*torch.exp(-nu_p)
             return nu_p - z + z.exp()
 
-        b, c = zs_n.shape
-        b, a, c = zsa_n.shape
-
         with torch.no_grad():
-            mu_q = self.mu(zsa_n)
-            nu_q = self.nu(zs_n)
-
-            logsumexp = torch.logsumexp(mu_q*(-nu_q).exp().unqueeze(1), dim=1)
+            logsumexp = torch.logsumexp(mu_q*(-nu_q).exp(), dim=1)
             mu_q = r + gamma*nu_q.exp()*logsumexp
             nu_q = nu_q+np.log(gamma)
 
         z = (mu_p-mu_q)*torch.exp(-nu_p)        
-        b = torch.exp(nu_q-nu_p)
+        d = torch.exp(nu_q-nu_p)
 
-        nu_p - z + np.euler_gamma*b + z.exp() + torch.lgamma(1+b).exp()
+        nu_p - z + np.euler_gamma*d + z.exp() + torch.lgamma(1+d).exp()
