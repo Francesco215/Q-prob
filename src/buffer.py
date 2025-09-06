@@ -61,6 +61,7 @@ class ReplayBuffer:
         self.ind = 0
         self.size = 0
         self.can_sample = torch.zeros(self.max_size, dtype=torch.bool)
+        self.env_terminates = False
 
     def add(self, state: np.array, action: int | float, next_state: np.array, reward: float, terminated: bool, truncated: bool):
         # The current state is represented by the most recent frame/observation
@@ -80,6 +81,7 @@ class ReplayBuffer:
 
         self.reward[self.ind] = reward
         self.not_done[self.ind] = 1.0 - terminated # `not_done` is important for the Bellman update
+        if terminated: self.env_terminates = True
         
         # Store the indices that make up the current state (s_t)
         self.state_indices[self.ind] = np.array(self.history_queue, dtype=np.int32)

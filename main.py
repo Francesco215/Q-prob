@@ -34,7 +34,7 @@ class DefaultExperimentArguments:
 def main():
     parser = argparse.ArgumentParser()
     # Experiment
-    parser.add_argument('--env', default='Gym-HalfCheetah-v4', type=str)
+    parser.add_argument('--env', default='Atari-Pong-v5', type=str)
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--total_timesteps', default=-1, type=int) # Uses default, input to override.
     parser.add_argument('--device', default='cuda', type=str)

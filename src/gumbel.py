@@ -147,27 +147,28 @@ class Agent:
 
         self.training_steps += 1
 
+        # --- 1. Update Target Networks Periodically ---
         if (self.training_steps-1) % self.target_update_freq == 0:
             self.policy_target.load_state_dict(self.policy.state_dict())
             self.value_target.load_state_dict(self.value.state_dict())
             self.encoder_target.load_state_dict(self.encoder.state_dict())
 
-            for _ in range(self.target_update_freq):
-                state, action, next_state, reward, not_done = self.replay_buffer.sample()
-                state, next_state = maybe_augment_state(state, next_state, self.pixel_obs, self.pixel_augs)
-                self.train_encoder(state, action, next_state, reward, not_done, self.replay_buffer.env_terminates)
+        # --- 2. Train the World Model (Encoder) ---
+        state_enc, action_enc, next_state_enc, reward_enc, not_done_enc = self.replay_buffer.sample()
+        state_enc, next_state_enc = maybe_augment_state(state_enc, next_state_enc, self.pixel_obs, self.pixel_augs)
+        self.train_encoder(state_enc, action_enc, next_state_enc, reward_enc, not_done_enc, self.replay_buffer.env_terminates)
 
-        state, action, next_state, reward, not_done = self.replay_buffer.sample()
-        state, next_state = maybe_augment_state(state, next_state, self.pixel_obs, self.pixel_augs) #TODO: check this
-
+        # --- 3. Train the RL Agent (Policy and Value) ---
+        state_rl, action_rl, next_state_rl, reward_rl, not_done_rl = self.replay_buffer.sample()
+        state_rl, next_state_rl = maybe_augment_state(state_rl, next_state_rl, self.pixel_obs, self.pixel_augs)
         
-        KL = self.train_rl(state, action, next_state, reward, self.term_discount)
+        KL = self.train_rl(state_rl, action_rl, next_state_rl, reward_rl)
 
+        # --- 4. Update Replay Buffer Priorities ---
         if self.prioritized:
             priority = KL
             priority = priority.clamp(min=self.min_priority).pow(self.alpha)
             self.replay_buffer.update_priority(priority)
-
 
     def train_encoder(self, state: torch.Tensor, action: torch.Tensor, next_state: torch.Tensor,
         reward: torch.Tensor, not_done: torch.Tensor, env_terminates: bool):
@@ -176,12 +177,12 @@ class Agent:
                 next_state.reshape(-1,*self.state_shape) # Combine batch and horizon
             ).reshape(state.shape[0],-1,self.zs_dim) # Separate batch and horizon
 
-        pred_zs = self.encoder.zs(state[:,0])
+        pred_zs = self.encoder.zs(state)
         prev_not_done = 1 # In subtrajectories with termination, mask out losses after termination.
         encoder_loss = 0 # Loss is accumluated over enc_horizon.
 
         for i in range(self.enc_horizon):
-            pred_d, pred_zs, pred_r = self.encoder.model_all(pred_zs, action[:,i])
+            pred_d, pred_zs, pred_r = self.encoder.model_all(pred_zs, action)
 
             # Mask out states past termination.
             dyn_loss = masked_mse(pred_zs, encoder_target[:,i], prev_not_done)
