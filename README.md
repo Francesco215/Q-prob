@@ -38,21 +38,23 @@ Intuitively, some game states are much harder to evaluate than others. We theref
 
 Let us assume:
 
-- $Q$ is drawn from a probability distribution $p = p(Q|s,a)$  
-- The target is drawn from $q = q(Q|r,s')$, where
+- The target is drawn from a probability distribution $p = p(Q|r,s')$, where
 
 $$
-q(Q|r,s') = r + \gamma \max_{a'} p(Q|s',a').
+p(Q|r,s') = r + \gamma \max_{a'} q(Q|s',a'),
 $$
+
+- $q$ is the model prediction distribution $q = q(Q|s,a)$.
+
 
 We can define the loss as the **negative log-likelihood**:
 
 $$
-L = -\mathbb{E}_{\{s,a,r,s'\}\sim D} \Big[ \mathbb{E}_{Q\sim q}\,\log p \Big]
-   = -\mathbb{E}_{\{s,a,r,s'\}\sim D} \Big[ \mathrm{KL}(q\|p) + H[q] \Big],
+L = -\mathbb{E}_{\{s,a,r,s'\}\sim D} \Big[ \mathbb{E}_{Q\sim p}\,\log q \Big]
+   = -\mathbb{E}_{\{s,a,r,s'\}\sim D} \Big[ \mathrm{KL}(p\|q) + H[p] \Big],
 $$
 
-where $H[q]$ is the entropy of $q$.
+where $H[p]$ is the entropy of $p$.
 
 
 ## Choosing $p$ and $q$
@@ -60,7 +62,7 @@ where $H[q]$ is the entropy of $q$.
 Since
 
 $$
-q(Q|r,s') = r + \gamma \max_{a'} p(Q|s',a'),
+p(Q|r,s') = r + \gamma \max_{a'} q(Q|s',a'),
 $$
 
 the family of distributions must be **closed under maximization** (for the $\max_{a'}$ term) and **closed under linear transformations** (for the shift by $r$ and scaling by $\gamma$).
@@ -69,15 +71,15 @@ These properties hold for the [Generalized Extreme Value (GEV) distribution](htt
 In this work, we use the [**Gumbel distribution**](https://en.wikipedia.org/wiki/Gumbel_distribution):
 
 $$
-p(Q|s,a) = \mathrm{Gumbel}(Q|\mu,\beta) 
+q(Q|s,a) = \mathrm{Gumbel}(Q|\mu,\beta) 
 = \frac{1}{\beta} e^{-(z+e^{-z})}, 
 \quad z = \frac{Q-\mu}{\beta}.
 $$
 
 Here:
 
-- $\mu_p = \mu_\theta(s,a)$ depends on both state and action,  
-- $\beta_p = \beta_\phi(s)$ depends only on the state.  
+- $\mu_q = \mu_\theta(s,a)$ depends on both state and action,  
+- $\beta_q = \beta_\phi(s)$ depends only on the state.  
 
 Both are learnable functions parameterized by $\theta$ and $\phi$.
 
@@ -87,14 +89,14 @@ Both are learnable functions parameterized by $\theta$ and $\phi$.
 It can be shown that under this definition:
 
 $$
-q(Q|r,s') = \mathrm{Gumbel}(Q|\mu_q,\beta_q),
+p(Q|r,s') = \mathrm{Gumbel}(Q|\mu_p,\beta_p),
 $$
 
 with
 
 $$
-\beta_q = \gamma \cdot \beta_\phi(s'), \quad
-\mu_q = r + \gamma \cdot \beta_\phi(s') \cdot 
+\beta_p = \gamma \cdot \beta_\phi(s'), \quad
+\mu_p = r + \gamma \cdot \beta_\phi(s') \cdot 
 \log\!\left[ \sum_{a'} \exp\frac{\mu_\theta(s',a')}{\beta_\phi(s')} \right].
 $$
 
@@ -118,12 +120,12 @@ Let $p = \mathrm{Gumbel}(\mu_p,\beta_p)$ and $q = \mathrm{Gumbel}(\mu_q,\beta_q)
 The KL divergence has a closed form [[source](https://mast.queensu.ca/~communications/Papers/gil-msc11.pdf)]:
 
 $$
-\mathrm{KL}[q\|p] =
-\ln\frac{\beta_p}{\beta_q}
-+ \frac{\mu_q - \mu_p}{\beta_p}
-+ \gamma_e\left(\frac{\beta_q}{\beta_p} - 1\right)
-+ \exp\left(-\frac{\mu_q-\mu_p}{\beta_p}\right)
-\Gamma\left(1 + \frac{\beta_q}{\beta_p}\right) - 1
+\mathrm{KL}[p\|q] =
+\ln\frac{\beta_q}{\beta_p}
++ \frac{\mu_p - \mu_q}{\beta_q}
++ \gamma_e\left(\frac{\beta_p}{\beta_q} - 1\right)
++ \exp\left(-\frac{\mu_p-\mu_q}{\beta_q}\right)
+\Gamma\left(1 + \frac{\beta_p}{\beta_q}\right) - 1
 $$
 
 where $\Gamma(\cdot)$ is the gamma function.
@@ -136,40 +138,40 @@ To improve numerical stability, we reparameterize with $\nu = \log \beta$.
 Then:
 
 $$
-\mathrm{KL}[q\|p] =
-\nu_p - \nu_q
-- (\mu_p-\mu_q)\,e^{-\nu_p} 
-+ \gamma_e \big(e^{\nu_q-\nu_p}-1\big) 
-+ \exp\!\big[(\mu_p-\mu_q)e^{-\nu_p}\big]\,
-\Gamma\!\left(e^{\nu_q-\nu_p}+1\right) - 1
+\mathrm{KL}[p\|q] =
+\nu_q - \nu_p
+- (\mu_q-\mu_p)\,e^{-\nu_q} 
++ \gamma_e \big(e^{\nu_p-\nu_q}-1\big) 
++ \exp\!\big[(\mu_q-\mu_p)e^{-\nu_q}\big]\,
+\Gamma\!\left(e^{\nu_p-\nu_q}+1\right) - 1
 $$
 
 and
 
 $$
-H[q] = \nu_q + \gamma_e + 1.
+H[p] = \nu_p + \gamma_e + 1.
 $$
 
 So the total loss becomes:
 
 $$
-L = \mathrm{KL}[q\|p] + H[q] =
-\nu_p \;-\; (\mu_p-\mu_q)\,e^{-\nu_p}
-\;+\;\gamma_e\,e^{\nu_q-\nu_p}
-\;+\;\exp\!\big[(\mu_p-\mu_q)e^{-\nu_p}\big]\,
-\Gamma\!\big(1 + e^{\nu_q-\nu_p}\big)
+L = \mathrm{KL}[p\|q] + H[p] =
+\nu_q \;-\; (\mu_q-\mu_p)\,e^{-\nu_q}
+\;+\;\gamma_e\,e^{\nu_p-\nu_q}
+\;+\;\exp\!\big[(\mu_q-\mu_p)e^{-\nu_q}\big]\,
+\Gamma\!\big(1 + e^{\nu_p-\nu_q}\big)
 $$
 
 If you are at the last move the loss is just equal to 
 $$
-L = -\log p(r|\mu_p,\beta_p)=\nu_p -(\mu_p-r)e^{-\nu_p} + \exp\!\big[(\mu_p-r)e^{-\nu_p}\big]\,
+L = -\log q(r|\mu_q,\beta_q)=\nu_q -(\mu_q-r)e^{-\nu_q} + \exp\!\big[(\mu_q-r)e^{-\nu_q}\big]\,
 $$
 
 
 ## Interpretation
 
 - The **KL divergence** measures how much information the model gains when predicting future outcomes.  
-- The **Entropy** measures how much uncertain the model is when choosing the future move.  
+- The **Entropy** measures how uncertain the target distribution is.  
 - The **total loss** reflects both the **uncertainty** and the **error** of the model when deciding on an action.  
 
 
