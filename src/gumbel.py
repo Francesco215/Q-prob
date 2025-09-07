@@ -23,7 +23,7 @@ from .models import Gumbel
 @dataclasses.dataclass
 class Hyperparameters:
     # Generic
-    batch_size: int = 256
+    batch_size: int = 1024
     buffer_size: int = 1e6
     discount: float = 0.99
     target_update_freq: int = 250
@@ -42,7 +42,7 @@ class Hyperparameters:
     done_weight: float = 0.1
 
     # Replay Buffer (LAP)
-    prioritized: bool = True
+    prioritized: bool = False
     alpha: float = 0.4
     min_priority: float = 1
     enc_horizon: int = 5
@@ -154,7 +154,7 @@ class Agent:
             self.encoder_target.load_state_dict(self.encoder.state_dict())
 
         # --- 2. Train the World Model (Encoder) ---
-        state_enc, action_enc, next_state_enc, reward_enc, not_done_enc = self.replay_buffer.sample()
+        state_enc, action_enc, next_state_enc, reward_enc, not_done_enc = self.replay_buffer.sample(4096)
         # state_enc, next_state_enc = maybe_augment_state(state_enc, next_state_enc, self.pixel_obs, self.pixel_augs)
         self.train_encoder(state_enc, action_enc, next_state_enc, reward_enc, not_done_enc, self.replay_buffer.env_terminates)
 
@@ -162,7 +162,7 @@ class Agent:
         state_rl, action_rl, next_state_rl, reward_rl, not_done_rl = self.replay_buffer.sample()
         # state_rl, next_state_rl = maybe_augment_state(state_rl, next_state_rl, self.pixel_obs, self.pixel_augs)
         
-        KL = self.train_rl(state_rl, action_rl, next_state_rl, reward_rl)
+        KL = self.train_rl(state_rl, action_rl, next_state_rl, reward_rl, not_done_rl)
 
         # --- 4. Update Replay Buffer Priorities ---
         if self.prioritized:
@@ -197,24 +197,24 @@ class Agent:
 
 
     def train_rl(self, state: torch.Tensor, action: torch.Tensor, next_state: torch.Tensor,
-        reward: torch.Tensor):
+        reward: torch.Tensor, not_done_rl: torch.Tensor):
         with torch.no_grad():
             zs = self.encoder.zs(state)
             zsa = self.encoder(zs, action)
             next_zs = self.encoder_target.zs(next_state)
 
             # Pseudocode for discrete actions
-            all_next_actions_one_hot = torch.eye(self.action_dim).to(self.device)
-            repeated_next_zs = next_zs.repeat_interleave(self.action_dim, dim=0)
-            next_zsa = self.encoder_target(repeated_next_zs, all_next_actions_one_hot.repeat(self.batch_size, 1))
+            all_next_actions_one_hot = torch.eye(self.action_dim)[None].to(self.device).repeat(zs.shape[0],1,1)
+            repeated_next_zs =next_zs.unsqueeze(1).repeat(1,self.action_dim,1)
+            next_zsa = self.encoder_target(repeated_next_zs, all_next_actions_one_hot)
 
-            mu_q = self.value_target.mu(next_zsa)
-            nu_q = self.value_target.nu(next_zs)
+            mu_p = self.value_target.mu(next_zsa)
+            nu_p = self.value_target.nu(next_zs)
 
-        mu_p = self.value.mu(zsa)
-        nu_p = self.value.nu(zs)
+        mu_q = self.value.mu(zsa)
+        nu_q = self.value.nu(zs)
 
-        loss, KL = self.value.loss(reward, mu_p, nu_p, mu_q, nu_q)
+        loss, KL = self.value.loss(reward, mu_q, nu_q, mu_p, nu_p, not_done_rl, 0.9)
 
         self.value_optimizer.zero_grad(set_to_none=True)
         loss.backward()
@@ -226,7 +226,7 @@ class Agent:
         for p in self.value.parameters(): p.requires_grad = False
 
 
-        zs_policy = self.encoder.zs(state) 
+        zs = self.encoder.zs(state) 
         policy_action, _ = self.policy(zs) 
         zsa_policy = self.encoder(zs, policy_action)
         mu_policy, nu_policy = self.value.mu(zsa_policy), self.value.nu(zs)

@@ -9,6 +9,7 @@
 from collections import deque
 import numpy as np
 import torch
+import numbers
 
 class ReplayBuffer:
     def __init__(self, obs_shape: tuple[int, ...], action_dim: int, max_action: float, pixel_obs: bool,
@@ -70,7 +71,8 @@ class ReplayBuffer:
         self.obs[self.ind] = current_obs
 
         # Store action, reward, done flag
-        if isinstance(action, int):
+        if isinstance(action, numbers.Integral):
+            # This block now correctly executes for both standard int and np.int
             # Convert discrete action to one-hot
             one_hot_action = torch.zeros(self.action_dim, device=self.device)
             one_hot_action[action] = 1
@@ -78,6 +80,7 @@ class ReplayBuffer:
         else:
             # Normalize continuous action
             self.action[self.ind] = torch.as_tensor(action / self.action_scale, dtype=torch.float, device=self.device)
+
 
         self.reward[self.ind] = reward
         self.not_done[self.ind] = 1.0 - terminated # `not_done` is important for the Bellman update
@@ -110,21 +113,22 @@ class ReplayBuffer:
             for _ in range(self.history):
                 self.history_queue.append((self.ind) % self.max_size)
 
-    def _get_states(self, indices: np.ndarray) -> torch.Tensor:
+    def _get_states(self, indices: np.ndarray, batch_size:int) -> torch.Tensor:
         # Retrieve observations using the stored indices and reshape to form the state
         state_obs = self.obs[self.state_indices[indices]].to(self.device).float()
-        return state_obs.reshape(self.batch_size, *self.state_shape)
+        return state_obs.reshape(batch_size, *self.state_shape)
 
-    def _get_next_states(self, indices: np.ndarray) -> torch.Tensor:
+    def _get_next_states(self, indices: np.ndarray, batch_size:int) -> torch.Tensor:
         # The next state is formed from the history at s_t plus the new observation at s_{t+1}
         next_indices = (self.state_indices[indices][:, 1:] + 1) % self.max_size
         next_obs_index = (indices + 1) % self.max_size
         next_state_indices = np.concatenate([next_indices, next_obs_index[:, np.newaxis]], axis=1)
         
         next_state_obs = self.obs[next_state_indices].to(self.device).float()
-        return next_state_obs.reshape(self.batch_size, *self.state_shape)
+        return next_state_obs.reshape(batch_size, *self.state_shape)
 
-    def sample(self):
+    def sample(self, batch_size=None):
+        batch_size = self.batch_size if batch_size is None else batch_size
         # Determine valid indices for sampling
         valid_indices = torch.where(self.can_sample)[0]
         
@@ -132,17 +136,17 @@ class ReplayBuffer:
             # Sample using priorities
             valid_priorities = self.priority[valid_indices]
             csum = torch.cumsum(valid_priorities, 0)
-            rand_vals = torch.rand(size=(self.batch_size,), device=self.device) * csum[-1]
-            sampled_relative_indices = torch.searchsorted(csum, rand_vals)
+            rand_vals = torch.rand(size=(batch_size,), device=self.device) * csum[-1]
+            sampled_relative_indices = torch.searchsorted(csum, rand_vals).clamp(max=len(valid_indices)-1)     
         else:
             # Uniform sampling
-            sampled_relative_indices = torch.randint(0, len(valid_indices), size=(self.batch_size,), device=self.device)
+            sampled_relative_indices = torch.randint(0, len(valid_indices), size=(batch_size,), device=self.device)
 
         self.sampled_indices = valid_indices[sampled_relative_indices.cpu()].numpy()
         
         # Retrieve batch data
-        state = self._get_states(self.sampled_indices)
-        next_state = self._get_next_states(self.sampled_indices)
+        state = self._get_states(self.sampled_indices, batch_size)
+        next_state = self._get_next_states(self.sampled_indices, batch_size)
         action = self.action[self.sampled_indices]
         reward = self.reward[self.sampled_indices]
         not_done = self.not_done[self.sampled_indices]

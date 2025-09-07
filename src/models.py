@@ -69,7 +69,7 @@ class Encoder(nn.Module):
 
     def forward(self, zs: torch.Tensor, action: torch.Tensor):
         za = self.activ(self.za(action))
-        return self.zsa(torch.cat([zs, za], 1))
+        return self.zsa(torch.cat([zs, za], dim=-1))
 
 
     def model_all(self, zs: torch.Tensor, action: torch.Tensor):
@@ -110,37 +110,51 @@ class Policy(nn.Module):
         return action
 
 class ValueNetwork(nn.Module):
-    def __init__(self, input_dim: int, output_dim: int, hdim: int=512, activ: str='elu'):
+    def __init__(self, input_dim: int, hdim: int=512, activ: str='elu'):
         super().__init__()
         self.q1 = BaseMLP(input_dim, hdim, hdim, activ)
-        self.q2 = nn.Linear(hdim, output_dim)
+        self.q2 = nn.Linear(hdim, 1)
 
         self.activ = getattr(F, activ)
         self.apply(weight_init)
 
     def forward(self, zsa: torch.Tensor):
         zsa = ln_activ(self.q1(zsa), self.activ)
-        return self.q2(zsa)
+        return self.q2(zsa).squeeze(-1)
 
 class Value(nn.Module):
     def __init__(self, zsa_dim: int=512, hdim: int=512, activ: str='elu'):
         super().__init__()
 
-        self.q1 = ValueNetwork(zsa_dim, 1, hdim, activ)
-        self.q2 = ValueNetwork(zsa_dim, 1, hdim, activ)
+        self.q1 = ValueNetwork(zsa_dim, hdim, activ)
+        self.q2 = ValueNetwork(zsa_dim, hdim, activ)
 
 
     def forward(self, zsa: torch.Tensor):
         return torch.cat([self.q1(zsa), self.q2(zsa)], 1)
 
+class NuNetwork(nn.Module):
+    def __init__(self, input_dim: int, hdim: int=512, activ: str='elu'):
+        super().__init__()
+        self.net = BaseMLP(input_dim, 1, hdim, activ) # BaseMLP handles most layers
+
+        # Custom initialization for the *final layer* only
+        # This forces the initial output to be around -2.0
+        final_layer = self.net.l3
+        final_layer.weight.data.uniform_(-1e-2, 1e-2) # Almost zero weights
+        final_layer.bias.data.fill_(-2.0) # Strong negative bias
+
+    def forward(self, zsa: torch.Tensor):
+        return self.net(zsa).squeeze(-1)
+
 class Gumbel(nn.Module):
     def __init__(self, zsa_dim: int=512, zs_dim: int=512, hdim: int=512, activ: str='elu'):
         super().__init__()
-        self.mu = ValueNetwork(zsa_dim, 1, hdim, activ)
-        self.nu = ValueNetwork(zs_dim, 1, hdim, activ)
+        self.mu = ValueNetwork(zsa_dim, hdim, activ)
+        self.nu = NuNetwork(zs_dim, hdim, activ)
 
         self.activ = getattr(F, activ)
-        self.apply(weight_init)
+        # self.apply(weight_init)
 
     def distribuition(self, zsa, zs):
         mu, nu = self.mu(zsa), self.nu(zs)
@@ -148,21 +162,52 @@ class Gumbel(nn.Module):
         return torch.distributions.gumbel.Gumbel(mu, nu.exp())
     
 
-    def loss(self, r, mu_p, nu_p, mu_q, nu_q, gamma=1):
+    def loss(self, r, mu_q, nu_q, mu_p, nu_p, not_done_rl, gamma=1):
+        not_done_rl, r = not_done_rl.squeeze(-1), r.squeeze(-1)
+    
+        balance = not_done_rl.sum()/not_done_rl.numel()
+        not_done_rl = not_done_rl.bool()
 
-        if mu_q is None:
-            z = (mu_p - r)*torch.exp(-nu_p)
-            return nu_p - z + z.exp()
+        if balance!=1:
+            mu_done, nu_done, r_done= mu_q[~not_done_rl], nu_q[~not_done_rl], r[~not_done_rl]
+            z = (mu_done - r_done) * torch.exp(-nu_done)
+            loss_done = nu_done - z + torch.exp(z)
 
+        mu_q, nu_q, mu_p, nu_p, r = mu_q[not_done_rl], nu_q[not_done_rl], mu_p[not_done_rl], nu_p[not_done_rl], r[not_done_rl]
+        # This part for calculating target parameters is also correct.
         with torch.no_grad():
-            logsumexp = torch.logsumexp(mu_q*(-nu_q).exp().unsqueeze(1), dim=1)
-            mu_q = r + gamma*nu_q.exp()*logsumexp
-            nu_q = nu_q+np.log(gamma)
+            logsumexp = torch.logsumexp(mu_p * torch.exp(-nu_p).unsqueeze(1), dim=1)
+            mu_p_target = r + gamma * torch.exp(nu_p) * logsumexp
+            nu_p_target = nu_p + np.log(gamma)
 
-        z = (mu_p-mu_q)*torch.exp(-nu_p)        
-        d = torch.exp(nu_q-nu_p)
+        # Re-assign for clarity in the loss formula
+        print(
+            f"μ pred max: {mu_p.max(dim=1).values.mean():>8.4f}  |  "
+            f"μ target: {mu_p_target.mean():>8.4f}  |  "
+            f"μ_q: {mu_q.mean():>8.4f}  ||  "
+            f"ν pred: {nu_p.mean():>8.4f}  |  "
+            f"ν target: {nu_p_target.mean():>8.4f}"
+        )
+        mu_p = mu_p_target
+        nu_p = nu_p_target
 
-        loss = nu_p - z + np.euler_gamma*d + z.exp() + (1+d).lgamma().exp()
-        KL = loss + nu_q + np.euler_gamma + 1
+        # Loss calculation based on the paper's formulas
+        z = (mu_q - mu_p) * torch.exp(-nu_q)
+        d = torch.exp(nu_p - nu_q)
 
-        return loss.mean(), KL
+        # CORRECTED LOSS: Note the multiplication (*) in the last term
+        loss = nu_q - z + np.euler_gamma * d + torch.exp(z) * torch.exp(torch.lgamma(1 + d))
+    
+        # CORRECTED KL: Note the subtraction (-) to isolate the KL term
+        KL = loss - (nu_p + np.euler_gamma + 1)
+    
+
+        print(f"loss: {loss.mean().item():.4f}, KL: {KL.mean().item():.4f}, KL_r!=0 : {KL[r!=0].mean().item():.4f}")
+        if balance==1:
+            return loss.mean(), KL
+        
+        out_KL = torch.empty(not_done_rl.numel(), device = r.device)
+        out_KL[not_done_rl]=KL
+        out_KL[~not_done_rl]=loss_done
+
+        return loss.mean()*balance + (1-balance)*loss_done.mean(), out_KL
