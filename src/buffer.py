@@ -153,6 +153,7 @@ class ReplayBuffer:
 
         return state, action, next_state, reward, not_done
 
+    @torch.no_grad()
     def update_priority(self, priority: torch.Tensor):
         if not self.prioritized: return
         self.priority[self.sampled_indices] = priority.reshape(-1).detach()

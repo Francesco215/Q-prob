@@ -162,7 +162,7 @@ class Gumbel(nn.Module):
         z = (mu_p-mu_q)*torch.exp(-nu_p)        
         d = torch.exp(nu_q-nu_p)
 
-        loss = nu_p - z + np.euler_gamma*d + z.exp() + (1+d).lgamma.exp()
+        loss = nu_p - z + np.euler_gamma*d + z.exp() + (1+d).lgamma().exp()
         KL = loss + nu_q + np.euler_gamma + 1
 
         return loss.mean(), KL

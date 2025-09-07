@@ -85,7 +85,7 @@ class Hyperparameters:
 class Agent:
     def __init__(self, obs_shape: tuple, action_dim: int, max_action: float, pixel_obs: bool, discrete: bool,
         device: torch.device, history: int=1, hp: Dict={}):
-        self.name = 'MR.Q'
+        self.name = 'Gumbel'
 
         self.hp = Hyperparameters(**hp)
         utils.set_instance_vars(self.hp, self)
@@ -155,12 +155,12 @@ class Agent:
 
         # --- 2. Train the World Model (Encoder) ---
         state_enc, action_enc, next_state_enc, reward_enc, not_done_enc = self.replay_buffer.sample()
-        state_enc, next_state_enc = maybe_augment_state(state_enc, next_state_enc, self.pixel_obs, self.pixel_augs)
+        # state_enc, next_state_enc = maybe_augment_state(state_enc, next_state_enc, self.pixel_obs, self.pixel_augs)
         self.train_encoder(state_enc, action_enc, next_state_enc, reward_enc, not_done_enc, self.replay_buffer.env_terminates)
 
         # --- 3. Train the RL Agent (Policy and Value) ---
         state_rl, action_rl, next_state_rl, reward_rl, not_done_rl = self.replay_buffer.sample()
-        state_rl, next_state_rl = maybe_augment_state(state_rl, next_state_rl, self.pixel_obs, self.pixel_augs)
+        # state_rl, next_state_rl = maybe_augment_state(state_rl, next_state_rl, self.pixel_obs, self.pixel_augs)
         
         KL = self.train_rl(state_rl, action_rl, next_state_rl, reward_rl)
 
@@ -181,16 +181,15 @@ class Agent:
         prev_not_done = 1 # In subtrajectories with termination, mask out losses after termination.
         encoder_loss = 0 # Loss is accumluated over enc_horizon.
 
-        for i in range(self.enc_horizon):
-            pred_d, pred_zs, pred_r = self.encoder.model_all(pred_zs, action)
+        pred_d, pred_zs, pred_r = self.encoder.model_all(pred_zs, action)
 
-            # Mask out states past termination.
-            dyn_loss = masked_mse(pred_zs, encoder_target[:,i], prev_not_done)
-            reward_loss = (self.two_hot.cross_entropy_loss(pred_r, reward[:,i]) * prev_not_done).mean()
-            done_loss = masked_mse(pred_d, 1. - not_done[:,i].reshape(-1,1), prev_not_done) if env_terminates else 0
+        # Mask out states past termination.
+        dyn_loss = masked_mse(pred_zs, encoder_target, prev_not_done)
+        reward_loss = (self.two_hot.cross_entropy_loss(pred_r, reward) * prev_not_done).mean()
+        done_loss = masked_mse(pred_d, 1. - not_done.reshape(-1,1), prev_not_done) if env_terminates else 0
 
-            encoder_loss = encoder_loss + self.dyn_weight * dyn_loss + self.reward_weight * reward_loss + self.done_weight * done_loss
-            prev_not_done = not_done[:,i].reshape(-1,1) * prev_not_done # Adjust termination mask.
+        encoder_loss = encoder_loss + self.dyn_weight * dyn_loss + self.reward_weight * reward_loss + self.done_weight * done_loss
+        prev_not_done = not_done.reshape(-1,1) * prev_not_done # Adjust termination mask.
 
         self.encoder_optimizer.zero_grad(set_to_none=True)
         encoder_loss.backward()
@@ -198,7 +197,7 @@ class Agent:
 
 
     def train_rl(self, state: torch.Tensor, action: torch.Tensor, next_state: torch.Tensor,
-        reward: torch.Tensor, term_discount: torch.Tensor, reward_scale: float, target_reward_scale: float):
+        reward: torch.Tensor):
         with torch.no_grad():
             zs = self.encoder.zs(state)
             zsa = self.encoder(zs, action)
@@ -315,7 +314,7 @@ def realign(x, discrete: bool):
 
 
 def masked_mse(x: torch.Tensor, y: torch.Tensor, mask: torch.Tensor):
-    return (F.mse_loss(x, y, reduction='none') * mask).mean()
+    return (F.mse_loss(x, y.view(x.shape), reduction='none') * mask).mean()
 
 
 def multi_step_reward(reward: torch.Tensor, not_done: torch.Tensor, discount: float):
