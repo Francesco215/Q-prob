@@ -1,6 +1,21 @@
 # Probabilistic Q-Learning
 
-This is my attempt to figure out how Q-learning should be trained from first-principles
+> [!NOTE]
+> This is a weekend project I did to get my hands dirty for the first time with Reinforcment Learning
+
+Lately I've been reading some papers about off-policy RL methods. They don't really work well.
+
+In Q-learning people usually predict just the expected Q-value.
+
+So I though: Is it possible to predict the entire probability distribution of Q? 
+
+![image](img/Q.png)
+
+The answer is yes. In this repository i will show you how it is possible to do probabilistic Q-learning from first-principles.
+
+# Experiments
+
+
 
 # Some background
 
@@ -60,7 +75,7 @@ $$
 p^*(Q|s,a) = r(s,a) + \gamma \max_{a'} p^*(Q|s',a'),
 $$
 
-> [!Note]
+> [!NOTE]
 > by $\max p$ i mean the probability distribuition of the biggest $Q$ sampled from each $p(Q|s,a)$. I've decided to use this slightly wrong notation because doing otherwise would make the math needlessly cumbersome
 
 The family of distributions to witch $p^*$ belongs must be **closed under maximization** (for the $\max_{a'}$ term) and **closed under linear transformations** (for the shift by $r$ and scaling by $\gamma$).
@@ -79,10 +94,15 @@ Here:
 - $\mu = \mu(s,a)$ depends on both state and action,  
 - $\beta = \beta(s)$ depends only on the state.  
 
+$\mu$ represents the mean of the distribution and it converges to the expected reward, while $\beta$ represents how the model is unceirtain about the distribuition of $Q$.
+
+> [!TIP]
+> This is really important because we now have a way of estimating the confidence of the prediciton!
+
 Knowing that $p$ must be a Gumbel distribution is useful, but we still have the problem that in order to sample from $p(s,a)$ we need to know $p(s',a')$. It's a bit of a chicken and the egg problem.
 
 
-## Learning a probability distribution $q$
+## Learning the probability distribution $q$
 We want to learn a probability function $q(Q|s,a)$ that approximates $p^*$. Since $p^*$ is a Gumbel, this means that all we have to do is to learn the correct $\mu_q=\mu_\theta(s,a)$ and $\beta_q=\beta_\phi(s)$ that depend from some learnable parameters $\theta, \phi$ that describe the whole probability distribution space.
 
 $$
@@ -192,4 +212,5 @@ $$
 
 
 ## Final remarks
+TODO: explain how it's important to have the KL between distribuitions
 For stability reasons you need to calculate the gradient over $p$ as well
