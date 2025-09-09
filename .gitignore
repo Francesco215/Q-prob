@@ -1,6 +1,8 @@
+resources/
 .venv/
 evals/
 logs/
 results/
 **__pycache__**
 **.egg-info
+*.npy

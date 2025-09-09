@@ -18,7 +18,7 @@ BUFFER_SIZE = 100000      # Replay buffer size
 BATCH_SIZE = 64           # Training batch size
 LEARNING_RATE = 0.0005    # Optimizer learning rate
 TARGET_UPDATE_FREQ = 100  # How often to update target network
-MAX_EPISODES = 500        # Total training episodes
+MAX_EPISODES = 1000        # Total training episodes
 MAX_STEPS = 500           # Max steps per episode
 
 device = "cuda"
@@ -70,6 +70,8 @@ def train_dqn(env_name='CartPole-v1'):
 
     epsilon = EPSILON_START
     step_count = 0
+    loss = torch.tensor(0)
+    episode_rewards = []
 
     for episode in range(MAX_EPISODES):
         state, _ = env.reset()
@@ -130,13 +132,15 @@ def train_dqn(env_name='CartPole-v1'):
 
         # Decay epsilon
         epsilon = max(EPSILON_END, epsilon * EPSILON_DECAY)
-
+        episode_rewards.append(episode_reward)
         print(f"Episode {episode + 1}/{MAX_EPISODES} | Reward: {episode_reward} | Epsilon: {epsilon:.3f} | Loss: {loss.item():.3f}")
 
     env.close()
-    return policy_net  # Return trained model if needed
+    return policy_net, episode_rewards  # Return trained model if needed
 
 # Run the training
 if __name__ == "__main__":
-    trained_model = train_dqn(env_name='CartPole-v1')  # Swap to e.g., 'MountainCar-v0' for another env
+    trained_model, rewards = train_dqn(env_name='CartPole-v1')  # Swap to e.g., 'MountainCar-v0' for another env
+    with open('q-prob_rewards_base.npy', 'wb') as f:
+        np.save(f, rewards)
 # %%

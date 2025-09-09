@@ -8,17 +8,18 @@ import torch.nn.functional as F
 from collections import deque
 import gymnasium as gym
 import pufferlib.emulation
+from matplotlib import pyplot as plt
 
 # Hyperparameters (tune these as needed for your project)
 GAMMA = 0.99              # Discount factor
 T_START = 10.0       # Initial exploration rate
-T_END = 2.5        # Final exploration rate
+T_END = 1.        # Final exploration rate
 TEMPERATURE_DECAY = 0.995     # Exploration decay rate
 BUFFER_SIZE = 100000      # Replay buffer size
 BATCH_SIZE = 64           # Training batch size
 LEARNING_RATE = 0.0005    # Optimizer learning rate
 TARGET_UPDATE_FREQ = 100  # How often to update target network
-MAX_EPISODES = 500        # Total training episodes
+MAX_EPISODES = 1000        # Total training episodes
 MAX_STEPS = 500           # Max steps per episode
 
 device = "cuda"
@@ -52,14 +53,6 @@ class QNetwork(nn.Module):
         mu_p_target = r + gamma * torch.exp(nu_p) * logsumexp
         nu_p_target = nu_p + np.log(gamma)
 
-        # Re-assign for clarity in the loss formula
-        # print(
-        #     f"μ pred max: {mu_p.max(dim=1).values.mean():>8.4f}  |  "
-        #     f"μ target: {mu_p_target.mean():>8.4f}  |  "
-        #     f"μ_q: {mu_q.mean():>8.4f}  ||  "
-        #     f"ν pred: {nu_p.mean():>8.4f}  |  "
-        #     f"ν target: {nu_p_target.mean():>8.4f}"
-        # )
         mu_p = mu_p_target
         nu_p = nu_p_target
 
@@ -74,7 +67,7 @@ class QNetwork(nn.Module):
         KL[dones] = loss_done[dones]
         # print(f"loss: {loss.mean().item():.4f}, KL: {KL.mean().item():.4f}, KL_r!=0 : {KL[r!=0].mean().item():.4f}")
 
-        return loss.mean(), KL
+        return KL.mean(), loss
 
 # Replay buffer for experience replay
 class ReplayBuffer:
@@ -110,6 +103,7 @@ def train_dqn(env_name='CartPole-v1'):
     temperature = T_START
     step_count = 0
     last_loss, last_KL = 0, 0
+    episode_rewards=[]
 
     for episode in range(MAX_EPISODES):
         state, _ = env.reset()
@@ -155,27 +149,28 @@ def train_dqn(env_name='CartPole-v1'):
                 mu_p, nu_p = policy_net(next_states)
                 mu_q = mu_q[torch.arange(BATCH_SIZE), actions]
                 
-                loss, KL = policy_net.loss(rewards, mu_q, nu_q, mu_p, nu_p, dones, GAMMA)
+                KL_loss, Entropy_Loss = policy_net.loss(rewards, mu_q, nu_q, mu_p, nu_p, dones, GAMMA)
                 # Loss and optimization
                 optimizer.zero_grad()
-                loss.backward()
+                KL_loss.backward()
                 nn.utils.clip_grad_norm_(policy_net.parameters(), 1.)
                 optimizer.step()
-                last_loss = loss.item()
-                last_KL = KL.mean().item()
+                last_loss = KL_loss.item()
+                last_KL = Entropy_Loss.mean().item()
 
             if done:
                 break
 
         # Decay epsilon
-        temperature = max(1, temperature * TEMPERATURE_DECAY)
-
-        print(f"Episode {episode + 1}/{MAX_EPISODES} | Reward: {episode_reward} | Temperature: {temperature:.3f} | loss: {last_loss:.3f}, KL: {last_KL:.3f}")
+        temperature = max(T_END, temperature * TEMPERATURE_DECAY)
+        episode_rewards.append(episode_reward)
+        print(f"Episode {episode + 1}/{MAX_EPISODES} | Reward: {episode_reward:.1f} | Temperature: {temperature:.3f} | KL_loss: {last_loss:.3f}, Entropy: {last_KL:.3f}")
 
     env.close()
-    return policy_net  # Return trained model if needed
+    return policy_net, episode_rewards  # Return trained model if needed
 
 # Run the training
 if __name__ == "__main__":
-    trained_model = train_dqn(env_name='CartPole-v1')  # Swap to e.g., 'MountainCar-v0' for another env
-# %%
+    trained_model, rewards = train_dqn(env_name='CartPole-v1')  # Swap to e.g., 'MountainCar-v0' for another env
+    with open('q-prob_rewards.npy', 'wb') as f:
+        np.save(f, rewards)
