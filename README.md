@@ -17,7 +17,11 @@ The answer is yes. In this repository i will show you how it is possible to do p
 
 
 
-# Some background
+# Theory
+> [!WARNING]
+> This is the Nerd area, proceed with caution
+
+## Some Background
 
 Off-policy reinforcement learning revolves around the **Bellman equation**:
 
