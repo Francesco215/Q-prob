@@ -1,4 +1,8 @@
-# Some Background
+# Probabilistic Q-Learning
+
+This is my attempt to figure out how Q-learning should be trained from first-principles
+
+# Some background
 
 Off-policy reinforcement learning revolves around the **Bellman equation**:
 
@@ -14,7 +18,7 @@ Where:
 - $\max_{a'}Q^*(s',a')$ is the maximum $Q$-value for the next state $s'$ across all possible actions $a'$. This term links the current $Q$-value to the optimal future value, assuming the agent acts optimally.
 
 
-## The Loss Function
+## The current Loss Function
 
 Training is typically **bootstrapped**. A common approach is to minimize the $L_2$ loss:
 
@@ -26,70 +30,76 @@ where $D$ is the replay buffer, $\theta$ are the learnable parameters, and $\bar
 
 
 ## The Problem
-
-This approach does not scale well to complex, long-horizon tasks.  
-
 The main issue is that the model lacks a notion of **confidence** in its predictions. The loss above implicitly assumes $Q_\theta$ has a constant confidence interval, which is unrealistic.  
 
 Intuitively, some game states are much harder to evaluate than others. We therefore need a formulation that accounts for uncertainty.
 
+Moreover, the loss function above does not come from any rigorous first-principles maximum log-likelyhood calculations.
 
-# A Probabilistic Approach
 
-Let us assume:
+# A First-Principles Approach
+Suppose we have a ground truth probability $p^*(Q|s,a)$ of $Q^*$. The **Most likely approximation** $q(Q|s,a)$ of $p^*(Q|s,a)$ given the datapoint $\{s,a,r,s'\}\sim D$ is the one that minimizes the  **negative log-likelihood**:
 
-- The target is drawn from a probability distribution $p = p(Q|r,s')$, where
 
 $$
-p(Q|r,s') = r + \gamma \max_{a'} q(Q|s',a'),
+q = \argmin_q\left\{ -\mathbb{E}_{\{s,a,r,s'\}\sim D} \Big[ \mathbb{E}_{Q^*\sim p^*}\,\log q \Big]\right\}
 $$
 
-- $q$ is the model prediction distribution $q = q(Q|s,a)$.
-
-
-We can define the loss as the **negative log-likelihood**:
-
-$$
-L = -\mathbb{E}_{\{s,a,r,s'\}\sim D} \Big[ \mathbb{E}_{Q\sim p}\,\log q \Big]
-   = -\mathbb{E}_{\{s,a,r,s'\}\sim D} \Big[ \mathrm{KL}(p\|q) + H[p] \Big],
+It can also be expressed as
 $$
 
-where $H[p]$ is the entropy of $p$.
+   q= \argmin_q\left\{-\mathbb{E}_{\{s,a,r,s'\}\sim D} \Big[ \mathrm{KL}(p^*\|q) + H(p^*) \Big]\right\},
+$$
+where $H(p^*)$ is the entropy of $p^*$.
 
 
-## Choosing $p$ and $q$
-
-Since
+## Choosing $p$ 
+$p^*(Q|s,a)$ is the ground truth, therefore it must respect the Bellman equation:
 
 $$
-p(Q|r,s') = r + \gamma \max_{a'} q(Q|s',a'),
+p^*(Q|s,a) = r(s,a) + \gamma \max_{a'} p^*(Q|s',a'),
 $$
 
-the family of distributions must be **closed under maximization** (for the $\max_{a'}$ term) and **closed under linear transformations** (for the shift by $r$ and scaling by $\gamma$).
+> [!Note]
+> by $\max p$ i mean the probability distribuition of the biggest $Q$ sampled from each $p(Q|s,a)$. I've decided to use this slightly wrong notation because doing otherwise would make the math needlessly cumbersome
+
+The family of distributions to witch $p^*$ belongs must be **closed under maximization** (for the $\max_{a'}$ term) and **closed under linear transformations** (for the shift by $r$ and scaling by $\gamma$).
 
 These properties hold for the [Generalized Extreme Value (GEV) distribution](https://en.wikipedia.org/wiki/Generalized_extreme_value_distribution).  
 In this work, we use the [**Gumbel distribution**](https://en.wikipedia.org/wiki/Gumbel_distribution):
 
 $$
-q(Q|s,a) = \mathrm{Gumbel}(Q|\mu,\beta) 
+\mathrm{Gumbel}(Q|\mu,\beta) 
 = \frac{1}{\beta} e^{-(z+e^{-z})}, 
 \quad z = \frac{Q-\mu}{\beta}.
 $$
 
 Here:
 
-- $\mu_q = \mu_\theta(s,a)$ depends on both state and action,  
-- $\beta_q = \beta_\phi(s)$ depends only on the state.  
+- $\mu = \mu(s,a)$ depends on both state and action,  
+- $\beta = \beta(s)$ depends only on the state.  
 
-Both are learnable functions parameterized by $\theta$ and $\phi$.
+Knowing that $p$ must be a Gumbel distribution is useful, but we still have the problem that in order to sample from $p(s,a)$ we need to know $p(s',a')$. It's a bit of a chicken and the egg problem.
 
 
-## Target Distribution
-
-It can be shown that under this definition:
+## Learning a probability distribution $q$
+We want to learn a probability function $q(Q|s,a)$ that approximates $p^*$. Since $p^*$ is a Gumbel, this means that all we have to do is to learn the correct $\mu_q=\mu_\theta(s,a)$ and $\beta_q=\beta_\phi(s)$ that depend from some learnable parameters $\theta, \phi$ that describe the whole probability distribution space.
 
 $$
-p(Q|r,s') = \mathrm{Gumbel}(Q|\mu_p,\beta_p),
+q (Q|s,a)=\textrm {Gumbel}(Q|\mu_q,\beta_q)
+$$
+
+As for the target, since we don't know $p^*$ we approximate it with $p$ like so:
+
+$$
+p(Q|s,a) = r + \gamma \max_{a'} q(Q|s',a'),
+$$
+
+
+It can be shown that $p$ is equal to:
+
+$$
+p(Q|s,a) = \mathrm{Gumbel}(Q|\mu_p,\beta_p),
 $$
 
 with
@@ -101,14 +111,18 @@ $$
 $$
 
 
-## Useful Properties
+With this we can now express analytically the formulas for 
+$$
+\textrm{KL}(p||q)\quad \textrm{and}\quad H(p)
+$$
 
-### Entropy of a Gumbel
 
-For $X \sim \mathrm{Gumbel}(\mu,\beta)$:
+## Formulas for KL and Entorpy of Gumbel distributions
+
+For $x \sim \mathrm{Gumbel}(\mu,\beta)$:
 
 $$
-H[X] = \ln \beta + \gamma_e + 1,
+H(x) = \ln \beta + \gamma_e + 1,
 $$
 
 where $\gamma_e \approx 0.5772$ is the Euler–Mascheroni constant.
@@ -132,6 +146,8 @@ where $\Gamma(\cdot)$ is the gamma function.
 
 
 # The Final Loss
+> [Warning]
+> The formula might seem scary, but they are actally simple and numerically stable, nothing to be scared of
 
 To improve numerical stability, we reparameterize with $\nu = \log \beta$.  
 
@@ -175,3 +191,5 @@ $$
 - The **total loss** reflects both the **uncertainty** and the **error** of the model when deciding on an action.  
 
 
+## Final remarks
+For stability reasons you need to calculate the gradient over $p$ as well
