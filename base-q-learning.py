@@ -18,7 +18,7 @@ BUFFER_SIZE = 100000      # Replay buffer size
 BATCH_SIZE = 64           # Training batch size
 LEARNING_RATE = 0.0005    # Optimizer learning rate
 TARGET_UPDATE_FREQ = 100  # How often to update target network
-MAX_EPISODES = 1000        # Total training episodes
+MAX_EPISODES = 500        # Total training episodes
 MAX_STEPS = 500           # Max steps per episode
 
 device = "cuda"

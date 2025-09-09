@@ -1,25 +1,22 @@
 # Probabilistic Q-Learning
 
 > [!NOTE]
-> This is a weekend project I did to get my hands dirty for the first time with Reinforcment Learning
+> This is a weekend project I did to get my hands dirty for the first time with Reinforcement Learning.
 
-Lately I've been reading some papers about off-policy RL methods. They don't really work well.
+Lately, I’ve been reading some papers about off-policy RL methods. They don’t work that well in practice.  
 
-In Q-learning people usually predict just the expected Q-value.
+In standard Q-learning, people usually predict only the expected Q-value.  
 
-So I though: Is it possible to predict the entire probability distribution of Q? 
+So I thought: *is it possible to predict the entire probability distribution of Q?*  
 
 ![image](img/Q.png)
 
-The answer is yes. In this repository i will show you how it is possible to do probabilistic Q-learning from first-principles.
-
-# Experiments
-
+The answer is **yes**. In this repository I’ll show you how to perform **probabilistic Q-learning from first principles**.
 
 
 # Theory
 > [!WARNING]
-> This is the Nerd area, proceed with caution
+> This is the nerd area, proceed with caution.
 
 ## Some Background
 
@@ -34,10 +31,10 @@ Where:
 - $Q^*(s,a)$ is the optimal $Q$-value for taking action $a$ in state $s$. It represents the maximum total discounted reward the agent can expect from this point forward.
 - $r(s,a)$ is the immediate reward received after taking action $a$ from state $s$.
 - $\gamma \in (0,1]$ is the discount factor.
-- $\max_{a'}Q^*(s',a')$ is the maximum $Q$-value for the next state $s'$ across all possible actions $a'$. This term links the current $Q$-value to the optimal future value, assuming the agent acts optimally.
+- $\max_{a'}Q^*(s',a')$ is the maximum $Q$-value for the next state $s'$ across all possible actions $a'$. This links the current $Q$-value to the optimal future value, assuming the agent acts optimally.
 
 
-## The current Loss Function
+## The Current Loss Function
 
 Training is typically **bootstrapped**. A common approach is to minimize the $L_2$ loss:
 
@@ -49,30 +46,33 @@ where $D$ is the replay buffer, $\theta$ are the learnable parameters, and $\bar
 
 
 ## The Problem
-The main issue is that the model lacks a notion of **confidence** in its predictions. The loss above implicitly assumes $Q_\theta$ has a constant confidence interval, which is unrealistic.  
 
-Intuitively, some game states are much harder to evaluate than others. We therefore need a formulation that accounts for uncertainty.
+The main issue is that the model has no notion of **confidence** in its predictions. The loss above implicitly assumes $Q_\theta$ has a constant confidence interval, which is unrealistic.  
 
-Moreover, the loss function above does not come from any rigorous first-principles maximum log-likelyhood calculations.
+Some states are much harder to evaluate than others. We therefore need a formulation that accounts for uncertainty.  
+
+Moreover, the $L_2$ loss does not come from any rigorous first-principles maximum likelihood calculation.
 
 
 # A First-Principles Approach
-Suppose we have a ground truth probability $p^*(Q|s,a)$ of $Q^*$. The **Most likely approximation** $q(Q|s,a)$ of $p^*(Q|s,a)$ given the datapoint $\{s,a,r,s'\}\sim D$ is the one that minimizes the  **negative log-likelihood**:
 
+Suppose we have a ground-truth distribution $p^*(Q|s,a)$ of $Q^*$. The **most likely approximation** $q(Q|s,a)$ of $p^*(Q|s,a)$ given data $\{s,a,r,s'\}\sim D$ is the one that minimizes the **negative log-likelihood**:
 
 $$
 q = \argmin_q\left\{ -\mathbb{E}_{\{s,a,r,s'\}\sim D} \Big[ \mathbb{E}_{Q^*\sim p^*}\,\log q \Big]\right\}
 $$
 
-It can also be expressed as
+This can also be expressed as:
+
+$$
+q= \argmin_q\left\{-\mathbb{E}_{\{s,a,r,s'\}\sim D} \Big[ \mathrm{KL}(p^*\|q) + H(p^*) \Big]\right\},
 $$
 
-   q= \argmin_q\left\{-\mathbb{E}_{\{s,a,r,s'\}\sim D} \Big[ \mathrm{KL}(p^*\|q) + H(p^*) \Big]\right\},
-$$
 where $H(p^*)$ is the entropy of $p^*$.
 
 
-## Choosing $p$ 
+## Choosing $p$
+
 $p^*(Q|s,a)$ is the ground truth, therefore it must respect the Bellman equation:
 
 $$
@@ -80,9 +80,12 @@ p^*(Q|s,a) = r(s,a) + \gamma \max_{a'} p^*(Q|s',a'),
 $$
 
 > [!NOTE]
-> by $\max p$ i mean the probability distribuition of the biggest $Q$ sampled from each $p(Q|s,a)$. I've decided to use this slightly wrong notation because doing otherwise would make the math needlessly cumbersome
+> By $\max p$ I mean the distribution of the maximum $Q$ sampled from each $p(Q|s,a)$. I’m using this slightly abusive notation to avoid making the math unnecessarily cumbersome.
 
-The family of distributions to witch $p^*$ belongs must be **closed under maximization** (for the $\max_{a'}$ term) and **closed under linear transformations** (for the shift by $r$ and scaling by $\gamma$).
+The family of distributions to which $p^*$ belongs must be:
+
+- **Closed under maximization** (for the $\max_{a'}$ term).  
+- **Closed under linear transformations** (for the reward shift and scaling by $\gamma$).  
 
 These properties hold for the [Generalized Extreme Value (GEV) distribution](https://en.wikipedia.org/wiki/Generalized_extreme_value_distribution).  
 In this work, we use the [**Gumbel distribution**](https://en.wikipedia.org/wiki/Gumbel_distribution):
@@ -95,38 +98,44 @@ $$
 
 Here:
 
-- $\mu = \mu(s,a)$ depends on both state and action,  
+- $\mu = \mu(s,a)$ depends on both state and action.  
 - $\beta = \beta(s)$ depends only on the state.  
 
-$\mu$ represents the mean of the distribution and it converges to the expected reward, while $\beta$ represents how the model is unceirtain about the distribuition of $Q$.
+$\mu$ represents the mean and converges to the expected reward.  
+$\beta$ represents the model’s **uncertainty** about the distribution of $Q$.
 
 > [!TIP]
-> This is really important because we now have a way of estimating the confidence of the prediciton!
+> This is crucial because we now have a principled way of estimating the **confidence** of the prediction!
 
-Knowing that $p$ must be a Gumbel distribution is useful, but we still have the problem that in order to sample from $p(s,a)$ we need to know $p(s',a')$. It's a bit of a chicken and the egg problem.
+Knowing that $p$ must be Gumbel is useful, but to sample from $p(s,a)$ we need $p(s',a')$. This is a bit of a chicken-and-egg problem.
 
 
-## Learning the probability distribution $q$
-We want to learn a probability function $q(Q|s,a)$ that approximates $p^*$. Since $p^*$ is a Gumbel, this means that all we have to do is to learn the correct $\mu_q=\mu_\theta(s,a)$ and $\beta_q=\beta_\phi(s)$ that depend from some learnable parameters $\theta, \phi$ that describe the whole probability distribution space.
+## Learning the Probability Distribution $q$
+
+We want to learn a distribution $q(Q|s,a)$ that approximates $p^*$. Since $p^*$ is Gumbel, this means we only need to learn the correct:
+
+- $\mu_q = \mu_\theta(s,a)$  
+- $\beta_q = \beta_\phi(s)$  
+
+with learnable parameters $\theta, \phi$.
 
 $$
-q (Q|s,a)=\textrm {Gumbel}(Q|\mu_q,\beta_q)
+q (Q|s,a) = \mathrm{Gumbel}(Q|\mu_q,\beta_q)
 $$
 
-As for the target, since we don't know $p^*$ we approximate it with $p$ like so:
+As for the target, since we don’t know $p^*$, we approximate it with $p$:
 
 $$
 p(Q|s,a) = r + \gamma \max_{a'} q(Q|s',a'),
 $$
 
-
-It can be shown that $p$ is equal to:
+which is also Gumbel:
 
 $$
 p(Q|s,a) = \mathrm{Gumbel}(Q|\mu_p,\beta_p),
 $$
 
-with
+with:
 
 $$
 \beta_p = \gamma \cdot \beta_\phi(s'), \quad
@@ -134,14 +143,14 @@ $$
 \log\!\left[ \sum_{a'} \exp\frac{\mu_\theta(s',a')}{\beta_\phi(s')} \right].
 $$
 
+With this, we can express analytic formulas for:
 
-With this we can now express analytically the formulas for 
 $$
-\textrm{KL}(p||q)\quad \textrm{and}\quad H(p)
+\mathrm{KL}(p\|q)\quad \text{and}\quad H(p).
 $$
 
 
-## Formulas for KL and Entorpy of Gumbel distributions
+## Formulas for KL and Entropy of Gumbels
 
 For $x \sim \mathrm{Gumbel}(\mu,\beta)$:
 
@@ -150,7 +159,6 @@ H(x) = \ln \beta + \gamma_e + 1,
 $$
 
 where $\gamma_e \approx 0.5772$ is the Euler–Mascheroni constant.
-
 
 ### KL Divergence Between Two Gumbels
 
@@ -170,8 +178,8 @@ where $\Gamma(\cdot)$ is the gamma function.
 
 
 # The Final Loss
-> [Warning]
-> The formula might seem scary, but they are actally simple and numerically stable, nothing to be scared of
+> [!WARNING]
+> The formulas might look scary, but they are actually simple and numerically stable.
 
 To improve numerical stability, we reparameterize with $\nu = \log \beta$.  
 
@@ -186,7 +194,7 @@ $$
 \Gamma\!\left(e^{\nu_p-\nu_q}+1\right) - 1
 $$
 
-and
+and:
 
 $$
 H[p] = \nu_p + \gamma_e + 1.
@@ -202,9 +210,10 @@ L = \mathrm{KL}[p\|q] + H[p] =
 \Gamma\!\big(1 + e^{\nu_p-\nu_q}\big)
 $$
 
-If you are at the last move the loss is just equal to 
+If you are at the final step (no future states), the loss simplifies to:
+
 $$
-L = -\log q(r|\mu_q,\beta_q)=\nu_q -(\mu_q-r)e^{-\nu_q} + \exp\!\big[(\mu_q-r)e^{-\nu_q}\big]\,
+L = -\log q(r|\mu_q,\beta_q)=\nu_q -(\mu_q-r)e^{-\nu_q} + \exp\!\big[(\mu_q-r)e^{-\nu_q}\big].
 $$
 
 
@@ -212,9 +221,49 @@ $$
 
 - The **KL divergence** measures how much information the model gains when predicting future outcomes.  
 - The **Entropy** measures how uncertain the target distribution is.  
-- The **total loss** reflects both the **uncertainty** and the **error** of the model when deciding on an action.  
+- The **total loss** captures both the **uncertainty** and the **error** of the model when deciding on an action.  
 
 
-## Final remarks
-TODO: explain how it's important to have the KL between distribuitions
-For stability reasons you need to calculate the gradient over $p$ as well
+## Final Remarks
+
+A key advantage of this approach lies in the **KL divergence term**.  
+
+If the future states are highly uncertain, then the target distribution $p$ has a large entropy. In this case, the KL divergence between $p$ and $q$ will be **small**, because there is not much information to gain — the model is not punished heavily for being uncertain when the future itself is unpredictable.  
+
+This has a very important effect: the model focuses its learning effort on **states where there is actual signal to be extracted**.  
+
+In contrast, the standard $L_2$ loss penalizes all errors equally, regardless of whether the target is predictable or inherently noisy. This means $L_2$ often wastes capacity trying to fit randomness that cannot be learned, while KL-based learning adapts naturally to the structure of uncertainty.  
+
+**Summary:**  
+- $\textrm{KL}$ encourages the model to learn **where it matters**.  
+- $L_2$ loss blindly penalizes everything, even noise.  
+
+Finally, for stability, the gradient should also be computed with respect to $p$, not just $q$.
+
+# Results
+
+I tested the model on the CartPole environment.  
+
+The model learns to balance the pole correctly. Below is the training curve for this algorithm compared to the $L_2$-loss baseline:
+
+![image](img/training_curve.png)
+
+The training is reasonably stable, though it could be improved. For now, I’m satisfied—  
+[**I just wanted to make it exist first, I’ll make it good later**](img/just-make.webp)
+
+# How to run the code
+
+To reproduce the experiments simply install the python libraries
+
+```bash
+pip install uv
+uv venv
+uv pip install -e .
+source .venv/bin/activate
+```
+
+and then choose which experiment to run
+```bash
+python q-prob.py          # probabilistic Q-learning with KL loss
+python base-q-learning.py # Q-learning with L2 loss
+```
