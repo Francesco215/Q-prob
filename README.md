@@ -23,7 +23,7 @@ The answer is **yes**. In this repository I’ll show you how to perform **proba
 Off-policy reinforcement learning revolves around the **Bellman equation**:
 
 $$
-Q^*(s,a) = r(s,a) + \gamma \max_{a'} Q^*(s',a')
+Q^* (s,a) = r(s,a) + \gamma \max_{a'} Q^* (s',a')
 $$
 
 Where:
@@ -56,33 +56,33 @@ Moreover, the $L_2$ loss does not come from any rigorous first-principles maximu
 
 # A First-Principles Approach
 
-Suppose we have a ground-truth distribution $p^*(Q|s,a)$ of $Q^*$. The **most likely approximation** $q(Q|s,a)$ of $p^*(Q|s,a)$ given data $\{s,a,r,s'\}\sim D$ is the one that minimizes the **negative log-likelihood**:
+Suppose we have a ground-truth distribution $p^* (Q|s,a)$ of $Q^* $. The **most likely approximation** $q(Q|s,a)$ of $p^*(Q|s,a)$ given data $\{s,a,r,s'\}\sim D$ is the one that minimizes the **negative log-likelihood**:
 
 $$
-q = \argmin_q\left\{ -\mathbb{E}_{\{s,a,r,s'\}\sim D} \Big[ \mathbb{E}_{Q^*\sim p^*}\,\log q \Big]\right\}
+q = \textrm{argmin}_q\bigg( -\mathbb{E}_{s,a,r,s'\sim D} \Big[ \mathbb{E}_{Q^* \sim p^* } \log q \Big] \bigg)
 $$
 
 This can also be expressed as:
 
 $$
-q= \argmin_q\left\{-\mathbb{E}_{\{s,a,r,s'\}\sim D} \Big[ \mathrm{KL}(p^*\|q) + H(p^*) \Big]\right\},
+q = \textrm{argmin}_q\bigg( -\mathbb{E}_{s,a,r,s'\sim D} \Big[ \mathrm{KL}(p^* |q) + H(p^* ) \Big] \bigg)
 $$
 
-where $H(p^*)$ is the entropy of $p^*$.
+where $H(p^* )$ is the entropy of $p^* $.
 
 
 ## Choosing $p$
 
-$p^*(Q|s,a)$ is the ground truth, therefore it must respect the Bellman equation:
+$p^* (Q|s,a)$ is the ground truth, therefore it must respect the Bellman equation:
 
 $$
-p^*(Q|s,a) = r(s,a) + \gamma \max_{a'} p^*(Q|s',a'),
+p^* (Q|s,a) = r(s,a) + \gamma \max_{a'} p^* (Q|s',a'),
 $$
 
 > [!NOTE]
-> By $\max p$ I mean the distribution of the maximum $Q$ sampled from each $p(Q|s,a)$. I’m using this slightly abusive notation to avoid making the math unnecessarily cumbersome.
+> By $\max_{a'}p$ I mean the distribution of the maximum $Q$ sampled from each $p(Q|s,a)$. I’m using this slightly abusive notation to avoid making the math unnecessarily cumbersome.
 
-The family of distributions to which $p^*$ belongs must be:
+The family of distributions to which $p^{*}$ belongs must be:
 
 - **Closed under maximization** (for the $\max_{a'}$ term).  
 - **Closed under linear transformations** (for the reward shift and scaling by $\gamma$).  
@@ -112,7 +112,7 @@ Knowing that $p$ must be Gumbel is useful, but to sample from $p(s,a)$ we need $
 
 ## Learning the Probability Distribution $q$
 
-We want to learn a distribution $q(Q|s,a)$ that approximates $p^*$. Since $p^*$ is Gumbel, this means we only need to learn the correct:
+We want to learn a distribution $q(Q|s,a)$ that approximates $p^* $, and to be able to do this well $q$ must be a Gumbel distribution too.
 
 - $\mu_q = \mu_\theta(s,a)$  
 - $\beta_q = \beta_\phi(s)$  
@@ -123,7 +123,7 @@ $$
 q (Q|s,a) = \mathrm{Gumbel}(Q|\mu_q,\beta_q)
 $$
 
-As for the target, since we don’t know $p^*$, we approximate it with $p$:
+As for the target, since we don’t know $p^* $, we approximate it with $p$:
 
 $$
 p(Q|s,a) = r + \gamma \max_{a'} q(Q|s',a'),
@@ -140,7 +140,7 @@ with:
 $$
 \beta_p = \gamma \cdot \beta_\phi(s'), \quad
 \mu_p = r + \gamma \cdot \beta_\phi(s') \cdot 
-\log\!\left[ \sum_{a'} \exp\frac{\mu_\theta(s',a')}{\beta_\phi(s')} \right].
+\log\left[ \sum_{a'} \exp\frac{\mu_\theta(s',a')}{\beta_\phi(s')} \right].
 $$
 
 With this, we can express analytic formulas for:
@@ -170,12 +170,7 @@ Let $p = \mathrm{Gumbel}(\mu_p,\beta_p)$ and $q = \mathrm{Gumbel}(\mu_q,\beta_q)
 The KL divergence has a closed form [[source](https://mast.queensu.ca/~communications/Papers/gil-msc11.pdf)]:
 
 $$
-\mathrm{KL}[p\|q] =
-\ln\frac{\beta_q}{\beta_p}
-+ \frac{\mu_p - \mu_q}{\beta_q}
-+ \gamma_e\left(\frac{\beta_p}{\beta_q} - 1\right)
-+ \exp\left(-\frac{\mu_p-\mu_q}{\beta_q}\right)
-\Gamma\left(1 + \frac{\beta_p}{\beta_q}\right) - 1
+\mathrm{KL}[p\|q] = \ln\frac{\beta_q}{\beta_p} + \frac{\mu_p - \mu_q}{\beta_q} + \gamma_e\left(\frac{\beta_p}{\beta_q} - 1\right) + \exp\left(-\frac{\mu_p-\mu_q}{\beta_q}\right) \Gamma\left(1 + \frac{\beta_p}{\beta_q}\right) - 1
 $$
 
 where $\Gamma(\cdot)$ is the gamma function.
@@ -190,12 +185,7 @@ To improve numerical stability, we reparameterize with $\nu = \log \beta$.
 Then:
 
 $$
-\mathrm{KL}[p\|q] =
-\nu_q - \nu_p
-- (\mu_q-\mu_p)\,e^{-\nu_q} 
-+ \gamma_e \big(e^{\nu_p-\nu_q}-1\big) 
-+ \exp\!\big[(\mu_q-\mu_p)e^{-\nu_q}\big]\,
-\Gamma\!\left(e^{\nu_p-\nu_q}+1\right) - 1
+\mathrm{KL}[p|q] = \nu_q - \nu_p - (\mu_q-\mu_p)\,e^{-\nu_q}  + \gamma_e \big(e^{\nu_p-\nu_q}-1\big)  + \exp\left[ (\mu_q-\mu_p)e^{-\nu_q} \right] \Gamma\left(e^{\nu_p-\nu_q}+1\right) - 1
 $$
 
 and:
@@ -207,17 +197,13 @@ $$
 So the total loss becomes:
 
 $$
-L = \mathrm{KL}[p\|q] + H[p] =
-\nu_q \;-\; (\mu_q-\mu_p)\,e^{-\nu_q}
-\;+\;\gamma_e\,e^{\nu_p-\nu_q}
-\;+\;\exp\!\big[(\mu_q-\mu_p)e^{-\nu_q}\big]\,
-\Gamma\!\big(1 + e^{\nu_p-\nu_q}\big)
+L = \mathrm{KL}[p\|q] + H[p] = \nu_q -(\mu_q-\mu_p)\,e^{-\nu_q} +\gamma_e e^{\nu_p-\nu_q} +\exp \left[ (\mu_q-\mu_p)e^{-\nu_q} \right] \Gamma\big(1 + e^{\nu_p-\nu_q}\big)
 $$
 
 If you are at the final step (no future states), the loss simplifies to:
 
 $$
-L = -\log q(r|\mu_q,\beta_q)=\nu_q -(\mu_q-r)e^{-\nu_q} + \exp\!\big[(\mu_q-r)e^{-\nu_q}\big].
+L = -\log q(r|\mu_q,\beta_q)=\nu_q -(\mu_q-r)e^{-\nu_q} + \exp\left[ (\mu_q-r)e^{-\nu_q} \right].
 $$
 
 
