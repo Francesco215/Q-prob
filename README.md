@@ -150,6 +150,10 @@ $$
 $$
 
 
+![image](img/sfondo.png)
+> Schematic representation of how it works. You compare the extreme value distributions of the next moves $p$ with the distribution $q$
+
+
 ## Formulas for KL and Entropy of Gumbels
 
 For $x \sim \mathrm{Gumbel}(\mu,\beta)$:
