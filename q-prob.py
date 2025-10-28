@@ -67,21 +67,21 @@ class QNetwork(nn.Module):
         KL[dones] = loss_done[dones]
         # print(f"loss: {loss.mean().item():.4f}, KL: {KL.mean().item():.4f}, KL_r!=0 : {KL[r!=0].mean().item():.4f}")
 
-        return KL.mean(), loss
+        return KL, loss
 
-# Replay buffer for experience replay
 class ReplayBuffer:
     def __init__(self, capacity):
         self.buffer = deque(maxlen=capacity)
 
-    def push(self, state, action, reward, next_state, done):
-        self.buffer.append((state, action, reward, next_state, done))
+    def push(self, state, action, reward, next_state, done, kl=None):
+        self.buffer.append((state, action, reward, next_state, done, kl))
 
     def sample(self, batch_size):
         return random.sample(self.buffer, batch_size)
 
     def __len__(self):
         return len(self.buffer)
+
 
 # Function to create the environment (easily swappable)
 def make_env(env_name='CartPole-v1'):
@@ -102,7 +102,7 @@ def train_dqn(env_name='CartPole-v1'):
 
     temperature = T_START
     step_count = 0
-    last_loss, last_KL = 0, 0
+    last_KL_loss, last_entropy_loss = 0, 0
     episode_rewards=[]
 
     for episode in range(MAX_EPISODES):
@@ -114,7 +114,7 @@ def train_dqn(env_name='CartPole-v1'):
         for step in range(MAX_STEPS):
             step_count += 1
 
-            # Epsilon-greedy action selection
+            # Action selection
             with torch.no_grad():
                 state_tensor = torch.FloatTensor(state).to(device)
                 mu, nu = policy_net(state_tensor)
@@ -130,13 +130,14 @@ def train_dqn(env_name='CartPole-v1'):
 
             # Push to replay buffer
             replay_buffer.push(state, action, reward, next_state, done)
-
             state = next_state
 
             # Train if buffer is large enough
             if len(replay_buffer) > BATCH_SIZE:
-                batch = replay_buffer.sample(BATCH_SIZE)
-                states, actions, rewards, next_states, dones = zip(*batch)
+                batch_indices = random.sample(range(len(replay_buffer.buffer)), BATCH_SIZE)
+                batch = [replay_buffer.buffer[i] for i in batch_indices]
+
+                states, actions, rewards, next_states, dones, stored_kls = zip(*batch)
 
                 states = torch.FloatTensor(np.array(states)).squeeze(1).to(device)
                 actions = torch.LongTensor([*actions]).to(device)
@@ -144,19 +145,27 @@ def train_dqn(env_name='CartPole-v1'):
                 next_states = torch.FloatTensor(np.array(next_states)).squeeze(1).to(device)
                 dones = torch.FloatTensor(dones).to(device)
 
-                # Compute Q values
                 mu_q, nu_q = policy_net(states)
                 mu_p, nu_p = policy_net(next_states)
                 mu_q = mu_q[torch.arange(BATCH_SIZE), actions]
-                
-                KL_loss, Entropy_Loss = policy_net.loss(rewards, mu_q, nu_q, mu_p, nu_p, dones, GAMMA)
-                # Loss and optimization
+
+                KL, entropy = policy_net.loss(rewards, mu_q, nu_q, mu_p, nu_p, dones, GAMMA)
+                KL_loss, Entropy_loss = KL.mean(), entropy.mean()
+
+                # Write updated KL values back into buffer
+                for i, idx in enumerate(batch_indices):
+                    s, a, r, ns, d, _ = replay_buffer.buffer[idx]
+                    replay_buffer.buffer[idx] = (s, a, r, ns, d, KL[i].item())
+
                 optimizer.zero_grad()
-                KL_loss.backward()
+                Entropy_loss.backward()
                 nn.utils.clip_grad_norm_(policy_net.parameters(), 1.)
                 optimizer.step()
-                last_loss = KL_loss.item()
-                last_KL = Entropy_Loss.mean().item()
+
+                last_KL_loss = KL_loss.item()
+                last_entropy_loss = Entropy_loss.item()
+
+
 
             if done:
                 break
@@ -164,7 +173,7 @@ def train_dqn(env_name='CartPole-v1'):
         # Decay epsilon
         temperature = max(T_END, temperature * TEMPERATURE_DECAY)
         episode_rewards.append(episode_reward)
-        print(f"Episode {episode + 1}/{MAX_EPISODES} | Reward: {episode_reward:.1f} | Temperature: {temperature:.3f} | KL_loss: {last_loss:.3f}, Entropy: {last_KL:.3f}")
+        print(f"Episode {episode + 1}/{MAX_EPISODES} | Reward: {episode_reward:.1f} | Temperature: {temperature:.3f} | KL_loss: {last_KL_loss:.3f}, Entropy: {last_entropy_loss:.3f}")
 
     env.close()
     return policy_net, episode_rewards  # Return trained model if needed
@@ -174,3 +183,4 @@ if __name__ == "__main__":
     trained_model, rewards = train_dqn(env_name='CartPole-v1')  # Swap to e.g., 'MountainCar-v0' for another env
     with open('q-prob_rewards.npy', 'wb') as f:
         np.save(f, rewards)
+# %%
