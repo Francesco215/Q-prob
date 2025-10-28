@@ -19,7 +19,7 @@ BUFFER_SIZE = 100000      # Replay buffer size
 BATCH_SIZE = 64           # Training batch size
 LEARNING_RATE = 0.0005    # Optimizer learning rate
 TARGET_UPDATE_FREQ = 100  # How often to update target network
-MAX_EPISODES = 500        # Total training episodes
+MAX_EPISODES = 3000        # Total training episodes
 MAX_STEPS = 500           # Max steps per episode
 
 device = "cuda"
@@ -70,14 +70,27 @@ class QNetwork(nn.Module):
         return KL, loss
 
 class ReplayBuffer:
-    def __init__(self, capacity):
+    def __init__(self, capacity, kl_temperature = 0.1):
         self.buffer = deque(maxlen=capacity)
+        self.kl_temperature = kl_temperature
 
     def push(self, state, action, reward, next_state, done, kl=None):
         self.buffer.append((state, action, reward, next_state, done, kl))
 
     def sample(self, batch_size):
-        return random.sample(self.buffer, batch_size)
+        # Extract KLs (default 0 if None)
+        kls = np.array([item[5] if item[5] is not None else 0.0 for item in self.buffer])
+
+        # Softmax probabilities
+        logits = kls / self.kl_temperature
+        logits -= logits.max()   # numerical stability
+        probs = np.exp(logits)
+        probs /= probs.sum()
+
+        # Weighted sampling
+        indices = np.random.choice(len(self.buffer), size=batch_size, p=probs)
+        batch = [self.buffer[idx] for idx in indices]
+        return batch, indices  # return indices so we can update KL back in buffer
 
     def __len__(self):
         return len(self.buffer)
@@ -134,9 +147,7 @@ def train_dqn(env_name='CartPole-v1'):
 
             # Train if buffer is large enough
             if len(replay_buffer) > BATCH_SIZE:
-                batch_indices = random.sample(range(len(replay_buffer.buffer)), BATCH_SIZE)
-                batch = [replay_buffer.buffer[i] for i in batch_indices]
-
+                batch, batch_indices = replay_buffer.sample(BATCH_SIZE)
                 states, actions, rewards, next_states, dones, stored_kls = zip(*batch)
 
                 states = torch.FloatTensor(np.array(states)).squeeze(1).to(device)
