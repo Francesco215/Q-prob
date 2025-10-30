@@ -70,7 +70,7 @@ class QNetwork(nn.Module):
         return KL, loss
 
 class ReplayBuffer:
-    def __init__(self, capacity, kl_temperature = 0.1):
+    def __init__(self, capacity, kl_temperature = 1):
         self.buffer = deque(maxlen=capacity)
         self.kl_temperature = kl_temperature
 
@@ -184,7 +184,7 @@ def train_dqn(env_name='CartPole-v1'):
         # Decay epsilon
         temperature = max(T_END, temperature * TEMPERATURE_DECAY)
         episode_rewards.append(episode_reward)
-        print(f"Episode {episode + 1}/{MAX_EPISODES} | Reward: {episode_reward:.1f} | Temperature: {temperature:.3f} | KL_loss: {last_KL_loss:.3f}, Entropy: {last_entropy_loss:.3f}")
+        print(f"Episode {episode + 1}/{MAX_EPISODES} | Reward: {episode_reward:.1f} | Temperature: {temperature:.3f} | KL_loss: {last_KL_loss:.3f}, Cross-Entropy: {last_entropy_loss:.3f}")
 
     env.close()
     return policy_net, episode_rewards  # Return trained model if needed
